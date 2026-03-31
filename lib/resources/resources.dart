@@ -1,0 +1,1 @@
+export 'package:tahfeex/resources/colors.dart';

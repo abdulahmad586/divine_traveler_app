@@ -1,0 +1,10 @@
+export 'package:tahfeex/widgets/surah_selector.dart';
+export 'package:tahfeex/widgets/juz_selector.dart';
+export 'package:tahfeex/widgets/page_button.dart';
+export 'package:tahfeex/widgets/icon_button.dart';
+export 'package:tahfeex/widgets/app_textfield.dart';
+export 'package:tahfeex/widgets/app_button.dart';
+export 'package:tahfeex/widgets/more_popup.dart';
+export 'package:tahfeex/widgets/text_popup.dart';
+export 'package:tahfeex/widgets/arabic_page_viewer.dart';
+export 'package:tahfeex/widgets/arabic_text_size_settings.dart';

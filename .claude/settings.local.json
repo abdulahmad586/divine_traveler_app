@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/abdul/StudioProjects/Tahfeex/test -type f -name *.dart)",
+      "Bash(flutter analyze:*)",
+      "Bash(flutter pub:*)"
+    ]
+  }
+}
