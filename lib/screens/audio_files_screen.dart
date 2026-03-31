@@ -33,7 +33,7 @@ class AudioFilesScreen extends StatelessWidget {
                 if (context.mounted) {
                   Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      AppRoute(
                           builder: (ct) =>
                               NewAudio(surahNumber, result.files.single,
                                   onSurahAdd: (surahAudio) {
@@ -140,7 +140,7 @@ class AudioFilesScreen extends StatelessWidget {
                                     state.audioFiles![index].totalAyahs) {
                                   Navigator.push(
                                       context,
-                                      MaterialPageRoute(
+                                      AppRoute(
                                           builder: (c) => AudioTrainingScreen(
                                                 state.audioFiles![index],
                                                 onUpdate: (sa) {

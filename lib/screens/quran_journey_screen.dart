@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:quran/quran.dart';
@@ -15,7 +16,9 @@ import 'package:tahfeex/screens/scholar_audio_picker.dart';
 import 'package:tahfeex/screens/tafseer_screen.dart';
 import 'package:tahfeex/service/app_storage.dart';
 import 'package:tahfeex/service/repositories/journey_repository.dart';
+import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
+import 'package:tahfeex/shared/progression/user_progression.dart';
 import 'package:tahfeex/widgets/widgets.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +48,11 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
   _ViewMode _viewMode = _ViewMode.ayahCentric;
   bool _completing = false;
 
+  // Phase 3 state
+  bool _glowing = false;
+  bool _showAudio = false;
+  bool _showTafsir = false;
+
   @override
   void initState() {
     super.initState();
@@ -59,11 +67,13 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
       final myMember = journey.memberFor(myUid);
       final first    = _firstIncomplete(journey, myMember);
       setState(() {
-        _journey  = journey;
-        _myMember = myMember;
-        _loading  = false;
-        _surah    = first?.$1 ?? journey.endSurah;
-        _ayah     = first?.$2 ?? journey.endAyah;
+        _journey    = journey;
+        _myMember   = myMember;
+        _loading    = false;
+        _surah      = first?.$1 ?? journey.endSurah;
+        _ayah       = first?.$2 ?? journey.endAyah;
+        _showAudio  = journey.dimensions.contains('memorize');
+        _showTafsir = journey.dimensions.contains('commentary');
       });
     } catch (e) {
       setState(() { _loading = false; _error = e.toString(); });
@@ -83,7 +93,6 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
     return null;
   }
 
-  bool get _isCurrentDone  => _myMember?.isAyahDone(_surah, _ayah) ?? false;
   bool get _isFirstAyah    => _surah == _journey!.startSurah && _ayah == _journey!.startAyah;
   bool get _isLastAyah     => _surah == _journey!.endSurah   && _ayah == _journey!.endAyah;
 
@@ -113,8 +122,17 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
     });
   }
 
+  void _triggerGlow() {
+    setState(() => _glowing = true);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _glowing = false);
+    });
+  }
+
   Future<void> _markComplete() async {
     if (_completing || _journey == null || _myMember?.isActionable != true) return;
+    HapticFeedback.lightImpact();
+    _triggerGlow();
     setState(() => _completing = true);
     try {
       final updated = await _repo.updateProgress(
@@ -123,6 +141,7 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
         ayah: _ayah,
       );
       if (!mounted) return;
+      UserProgression().recordActivity();
       final myUid      = FirebaseAuth.instance.currentUser?.uid ?? '';
       final wasLast    = _isLastAyah;
       final updatedMember = updated.memberFor(myUid);
@@ -132,6 +151,7 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
         _completing = false;
       });
       if (updatedMember?.isCompleted == true) {
+        UserProgression().setJourneyCompleted();
         _showCompletionDialog();
       } else if (!wasLast) {
         _nextAyah();
@@ -140,6 +160,7 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
       if (!mounted) return;
       setState(() => _completing = false);
       if (e.isJourneyCompleted) {
+        UserProgression().setJourneyCompleted();
         _showCompletionDialog();
       } else {
         ScaffoldMessenger.of(context)
@@ -179,7 +200,7 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
     if (_loading) {
       return const Scaffold(
         body: Center(
-            child: CircularProgressIndicator(color: AppColors.primaryColor)),
+            child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
     if (_error != null) {
@@ -206,102 +227,55 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
     }
 
     final j = _journey!;
-    final allDone = _firstIncomplete(j, _myMember) == null;
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              j.title,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis,
-            ),
-            Text(
-              allDone
-                  ? 'All ayahs complete'
-                  : '${getSurahName(_surah)} · Ayah $_ayah',
-              style: const TextStyle(fontSize: 11, color: Colors.white70),
-            ),
-          ],
+        title: Text(
+          getSurahName(_surah),
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-            child: Center(
-              child: Text(
-                '${_myMember?.completedCount ?? 0}/${j.totalAyahs}',
-                style: const TextStyle(fontSize: 12, color: Colors.white70),
-              ),
+          if (_viewMode == _ViewMode.pageContext)
+            TextButton(
+              onPressed: () => setState(() => _viewMode = _ViewMode.ayahCentric),
+              child: const Text('Ayah view',
+                  style: TextStyle(color: Colors.white, fontSize: 13)),
             ),
-          ),
-          IconButton(
-            tooltip: _viewMode == _ViewMode.ayahCentric
-                ? 'Page context view'
-                : 'Ayah focus view',
-            icon: Icon(
-              _viewMode == _ViewMode.ayahCentric
-                  ? Icons.menu_book_rounded
-                  : Icons.article_outlined,
-            ),
-            onPressed: () => setState(() {
-              _viewMode = _viewMode == _ViewMode.ayahCentric
-                  ? _ViewMode.pageContext
-                  : _ViewMode.ayahCentric;
-            }),
-          ),
         ],
       ),
-      floatingActionButton: _buildFab(j),
-      body: _viewMode == _ViewMode.ayahCentric
-          ? _AyahCentricView(
-              // key forces a fresh widget (and fresh audio/commentary state) on
-              // every ayah change.
-              key: ValueKey('${_surah}_$_ayah'),
-              journey: j,
-              myMember: _myMember,
-              surah: _surah,
-              ayah: _ayah,
-              onPrev: _isFirstAyah ? null : _prevAyah,
-              onNext: _isLastAyah  ? null : _nextAyah,
-            )
-          : _PageContextView(
-              journey: j,
-              myMember: _myMember,
-              surah: _surah,
-              ayah: _ayah,
-              onSelectAyah: (s, a) => setState(() { _surah = s; _ayah = a; }),
-            ),
-    );
-  }
-
-  Widget? _buildFab(Journey j) {
-    if (_myMember?.isActionable != true) return null;
-
-    if (_isCurrentDone) {
-      if (_isLastAyah) return null;
-      return FloatingActionButton.extended(
-        backgroundColor: Colors.grey[600],
-        onPressed: _nextAyah,
-        icon: const Icon(Icons.arrow_forward, color: Colors.white),
-        label: const Text('Next', style: TextStyle(color: Colors.white)),
-      );
-    }
-
-    return FloatingActionButton.extended(
-      backgroundColor: AppColors.primaryColor,
-      onPressed: _completing ? null : _markComplete,
-      icon: _completing
-          ? const SizedBox(
-              width: 18, height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white))
-          : const Icon(Icons.check_circle_outline, color: Colors.white),
-      label: const Text('Mark Complete',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: _viewMode == _ViewMode.ayahCentric
+            ? _AyahCentricView(
+                key: ValueKey('${_surah}_$_ayah'),
+                journey: j,
+                myMember: _myMember,
+                surah: _surah,
+                ayah: _ayah,
+                onPrev: _isFirstAyah ? null : _prevAyah,
+                onNext: _isLastAyah  ? null : _nextAyah,
+                glowing: _glowing,
+                showAudio: _showAudio,
+                showTafsir: _showTafsir,
+                isCompleting: _completing,
+                pageUnlocked: UserProgression().hasCompletedFirstAyah,
+                onToggleAudio: () => setState(() => _showAudio = !_showAudio),
+                onToggleTafsir: () => setState(() => _showTafsir = !_showTafsir),
+                onSwitchToPage: () => setState(() => _viewMode = _ViewMode.pageContext),
+                onMarkComplete: _markComplete,
+              )
+            : _PageContextView(
+                key: const ValueKey('page'),
+                journey: j,
+                myMember: _myMember,
+                surah: _surah,
+                ayah: _ayah,
+                onSelectAyah: (s, a) => setState(() { _surah = s; _ayah = a; }),
+                onBackToAyah: () => setState(() => _viewMode = _ViewMode.ayahCentric),
+              ),
+      ),
     );
   }
 }
@@ -317,6 +291,15 @@ class _AyahCentricView extends StatelessWidget {
   final int ayah;
   final VoidCallback? onPrev;
   final VoidCallback? onNext;
+  final bool glowing;
+  final bool showAudio;
+  final bool showTafsir;
+  final bool isCompleting;
+  final bool pageUnlocked;
+  final VoidCallback onToggleAudio;
+  final VoidCallback onToggleTafsir;
+  final VoidCallback onSwitchToPage;
+  final VoidCallback? onMarkComplete;
 
   const _AyahCentricView({
     super.key,
@@ -326,131 +309,398 @@ class _AyahCentricView extends StatelessWidget {
     required this.ayah,
     this.onPrev,
     this.onNext,
+    required this.glowing,
+    required this.showAudio,
+    required this.showTafsir,
+    required this.isCompleting,
+    required this.pageUnlocked,
+    required this.onToggleAudio,
+    required this.onToggleTafsir,
+    required this.onSwitchToPage,
+    this.onMarkComplete,
+  });
+
+  bool get _isDone       => myMember?.isAyahDone(surah, ayah) ?? false;
+  bool get _isActionable => myMember?.isActionable ?? false;
+  int  get _completed    => myMember?.completedCount ?? 0;
+  int  get _total        => journey.totalAyahs;
+
+  @override
+  Widget build(BuildContext context) {
+    final dims = journey.dimensions;
+
+    return Column(
+      children: [
+        // ── Slim progress bar ──────────────────────────────────────────────
+        _ProgressHeader(completed: _completed, total: _total),
+
+        // ── Main scrollable content ────────────────────────────────────────
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: (details) {
+              final v = details.primaryVelocity ?? 0;
+              if (v < -300) onNext?.call();
+              if (v >  300) onPrev?.call();
+            },
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSizes.pagePadding, 16,
+                AppSizes.pagePadding, 24,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Ayah card ──────────────────────────────────────────
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardSurface,
+                      borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+                      border: Border.all(
+                        color: glowing ? AppColors.gold : AppColors.border,
+                        width: glowing ? 2.0 : 1.0,
+                      ),
+                      boxShadow: glowing
+                          ? [BoxShadow(
+                              color: AppColors.gold.withValues(alpha: 0.25),
+                              blurRadius: 12,
+                              spreadRadius: 2,
+                            )]
+                          : null,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Surah name + ayah number + done badge
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    getSurahName(surah),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Ayah $ayah',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (_isDone) const _DoneBadge(),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Arabic text
+                        if (dims.contains('read'))
+                          SizedBox(
+                            width: double.infinity,
+                            child: Text(
+                              getVerse(surah, ayah),
+                              textAlign: TextAlign.right,
+                              style: GoogleFonts.lateef(
+                                textStyle: const TextStyle(
+                                  fontSize: 32,
+                                  color: AppColors.textPrimary,
+                                  height: 2.0,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                        // Divider between Arabic and translation
+                        if (dims.contains('read') && dims.contains('translate'))
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Divider(color: AppColors.border, height: 1),
+                          ),
+
+                        // Translation
+                        if (dims.contains('translate'))
+                          Text(
+                            getVerseTranslation(surah, ayah,
+                                translation: Translation.enSaheeh),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              height: 1.7,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  // ── Inline audio ─────────────────────────────────────────
+                  if (showAudio) ...[
+                    const SizedBox(height: 12),
+                    _JourneyAudioPlayer(
+                      key: ValueKey('audio_${surah}_$ayah'),
+                      surah: surah,
+                      ayah: ayah,
+                    ),
+                  ],
+
+                  // ── Inline tafsir ─────────────────────────────────────────
+                  if (showTafsir) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardSurface,
+                        borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+                        border: const Border.fromBorderSide(
+                            BorderSide(color: AppColors.border)),
+                      ),
+                      child: CommentarySection(
+                          surahNumber: surah, ayahNumber: ayah),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // ── Bottom controls ────────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.fromLTRB(
+            AppSizes.pagePadding, 8,
+            AppSizes.pagePadding, 16,
+          ),
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            border: Border(top: BorderSide(color: AppColors.border)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Prev / Next
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    onPressed: onPrev,
+                    icon: Icon(
+                      Icons.chevron_left,
+                      color: onPrev != null
+                          ? AppColors.textSecondary
+                          : AppColors.border,
+                      size: 28,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onNext,
+                    icon: Icon(
+                      Icons.chevron_right,
+                      color: onNext != null
+                          ? AppColors.textSecondary
+                          : AppColors.border,
+                      size: 28,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+
+              // Mark Complete button
+              if (_isActionable && !_isDone)
+                SizedBox(
+                  width: double.infinity,
+                  height: AppSizes.buttonHeight,
+                  child: ElevatedButton(
+                    onPressed: isCompleting ? null : onMarkComplete,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                          AppColors.primary.withValues(alpha: 0.6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(AppSizes.buttonRadius),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: isCompleting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text(
+                            'Mark Complete',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
+                  ),
+                ),
+
+              // Already done nudge
+              if (_isActionable && _isDone)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle,
+                          size: 16, color: AppColors.gold),
+                      const SizedBox(width: 6),
+                      Text(
+                        onNext != null ? 'Done — swipe or tap › to continue' : 'All done',
+                        style: const TextStyle(
+                            fontSize: 13, color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 12),
+
+              // Secondary actions row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _SecondaryAction(
+                    icon: Icons.volume_up_outlined,
+                    label: 'Audio',
+                    active: showAudio,
+                    onTap: onToggleAudio,
+                  ),
+                  const SizedBox(width: 32),
+                  _SecondaryAction(
+                    icon: Icons.menu_book_outlined,
+                    label: 'Tafsir',
+                    active: showTafsir,
+                    onTap: onToggleTafsir,
+                  ),
+                  const SizedBox(width: 32),
+                  _SecondaryAction(
+                    icon: Icons.grid_view_outlined,
+                    label: 'Page',
+                    active: false,
+                    locked: !pageUnlocked,
+                    onTap: pageUnlocked ? onSwitchToPage : null,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slim progress header
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ProgressHeader extends StatelessWidget {
+  final int completed;
+  final int total;
+  const _ProgressHeader({required this.completed, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = total > 0 ? completed / total : 0.0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSizes.pagePadding, 12, AppSizes.pagePadding, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: AnimatedProgressBar(
+              value: fraction,
+              minHeight: 4,
+              backgroundColor: AppColors.border,
+              color: AppColors.primaryMuted,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '$completed/$total',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Secondary action button (Audio / Tafsir / Page)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SecondaryAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final bool locked;
+  final VoidCallback? onTap;
+
+  const _SecondaryAction({
+    required this.icon,
+    required this.label,
+    required this.active,
+    this.locked = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isDone = myMember?.isAyahDone(surah, ayah) ?? false;
-    final dims   = journey.dimensions;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Ayah header ───────────────────────────────────────────────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      getSurahName(surah),
-                      style: const TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'Ayah $ayah',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
-              ),
-              if (isDone) _DoneBadge(),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // ── Arabic (read) ─────────────────────────────────────────────────
-          if (dims.contains('read'))
-            _SectionCard(
-              child: SizedBox(
-                width: double.infinity,
-                child: Text(
-                  getVerse(surah, ayah),
-                  textAlign: TextAlign.right,
-                  style: GoogleFonts.lateef(
-                    textStyle: const TextStyle(
-                        fontSize: 30, color: Colors.black87, height: 1.8),
+    final color = locked
+        ? AppColors.border
+        : active
+            ? AppColors.primaryMuted
+            : AppColors.textSecondary;
+    return Tooltip(
+      message: locked ? 'Complete your first ayah to unlock' : '',
+      child: GestureDetector(
+        onTap: locked ? null : onTap,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, size: 22, color: color),
+                if (locked)
+                  Positioned(
+                    top: -2,
+                    right: -4,
+                    child: Icon(Icons.lock_outline, size: 10, color: AppColors.border),
                   ),
-                ),
-              ),
+              ],
             ),
-
-          // ── Translation (translate) ───────────────────────────────────────
-          if (dims.contains('translate')) ...[
-            const SizedBox(height: 12),
-            _SectionCard(
-              label: 'Translation',
-              child: Text(
-                getVerseTranslation(surah, ayah,
-                    translation: Translation.enSaheeh),
-                style: TextStyle(
-                    fontSize: 15, height: 1.7, color: Colors.grey[800]),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: color,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
           ],
-
-          // ── Commentary (commentary) ───────────────────────────────────────
-          if (dims.contains('commentary')) ...[
-            const SizedBox(height: 12),
-            _SectionCard(
-              child: CommentarySection(surahNumber: surah, ayahNumber: ayah),
-            ),
-          ],
-
-          // ── Audio (memorize) ──────────────────────────────────────────────
-          if (dims.contains('memorize')) ...[
-            const SizedBox(height: 12),
-            _SectionCard(
-              label: 'Memorize',
-              child: _JourneyAudioPlayer(
-                key: ValueKey('audio_${surah}_$ayah'),
-                surah: surah,
-                ayah: ayah,
-              ),
-            ),
-          ],
-
-          // ── Prev / Next navigation ────────────────────────────────────────
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Expanded(
-                child: onPrev != null
-                    ? OutlinedButton.icon(
-                        onPressed: onPrev,
-                        icon: const Icon(Icons.arrow_back, size: 16),
-                        label: const Text('Previous'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.grey[700],
-                          side: BorderSide(color: Colors.grey[300]!),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-              if (onPrev != null && onNext != null) const SizedBox(width: 12),
-              Expanded(
-                child: onNext != null
-                    ? OutlinedButton.icon(
-                        onPressed: onNext,
-                        icon: const Icon(Icons.arrow_forward, size: 16),
-                        label: const Text('Next'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primaryColor,
-                          side: BorderSide(
-                              color: AppColors.primaryColor.withOpacity(0.5)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -466,13 +716,16 @@ class _PageContextView extends StatefulWidget {
   final int surah;
   final int ayah;
   final void Function(int surah, int ayah) onSelectAyah;
+  final VoidCallback onBackToAyah;
 
   const _PageContextView({
+    super.key,
     required this.journey,
     required this.myMember,
     required this.surah,
     required this.ayah,
     required this.onSelectAyah,
+    required this.onBackToAyah,
   });
 
   @override
@@ -502,7 +755,6 @@ class _PageContextViewState extends State<_PageContextView> {
     }
   }
 
-  /// Color for each ayah's verse-end symbol in the page viewer.
   Color? _ayahColor(int ayahNo, int surahNo) {
     final j            = widget.journey;
     final linear       = journeyLinearIndex(surahNo, ayahNo);
@@ -511,10 +763,12 @@ class _PageContextViewState extends State<_PageContextView> {
 
     if (linear < linearStart || linear > linearEnd) return Colors.grey[300];
     if (surahNo == widget.surah && ayahNo == widget.ayah) {
-      return AppColors.primaryColor;
+      return AppColors.primary;
     }
-    if (widget.myMember?.isAyahDone(surahNo, ayahNo) == true) return Colors.teal;
-    return Colors.green;
+    if (widget.myMember?.isAyahDone(surahNo, ayahNo) == true) {
+      return AppColors.primaryMuted;
+    }
+    return AppColors.primary.withValues(alpha: 0.4);
   }
 
   void _onAyahTapped(int ayahNo, int surahNo) {
@@ -553,38 +807,40 @@ class _PageContextViewState extends State<_PageContextView> {
         // ── Page navigation bar ────────────────────────────────────────────
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(top: BorderSide(color: Colors.grey[200]!)),
+          decoration: const BoxDecoration(
+            color: AppColors.cardSurface,
+            border: Border(top: BorderSide(color: AppColors.border)),
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
                 icon: const Icon(Icons.chevron_left),
-                color: AppColors.primaryColor,
-                disabledColor: Colors.grey[300],
+                color: AppColors.primary,
+                disabledColor: AppColors.border,
                 onPressed:
                     _page > _firstPage ? () => setState(() => _page--) : null,
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Page $_page',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14),
-                  ),
-                  Text(
-                    'Tap an ayah for details',
-                    style: TextStyle(fontSize: 10, color: Colors.grey[400]),
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Page $_page',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 14),
+                    ),
+                    Text(
+                      'Tap an ayah for details',
+                      style: const TextStyle(
+                          fontSize: 10, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right),
-                color: AppColors.primaryColor,
-                disabledColor: Colors.grey[300],
+                color: AppColors.primary,
+                disabledColor: AppColors.border,
                 onPressed:
                     _page < _lastPage ? () => setState(() => _page++) : null,
               ),
@@ -633,7 +889,7 @@ class _AyahBottomSheet extends StatelessWidget {
               child: Container(
                 width: 36, height: 4,
                 decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: AppColors.border,
                     borderRadius: BorderRadius.circular(2)),
               ),
             ),
@@ -648,17 +904,18 @@ class _AyahBottomSheet extends StatelessWidget {
                     children: [
                       Text(getSurahName(surah),
                           style: const TextStyle(
-                              fontSize: 17, fontWeight: FontWeight.bold)),
+                              fontSize: 17, fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary)),
                       Text('Ayah $ayah',
-                          style: TextStyle(
-                              fontSize: 13, color: Colors.grey[500])),
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textSecondary)),
                     ],
                   ),
                 ),
-                if (isDone) _DoneBadge(),
+                if (isDone) const _DoneBadge(),
               ],
             ),
-            const Divider(height: 24),
+            const Divider(height: 24, color: AppColors.border),
 
             // Arabic
             if (dims.contains('read')) ...[
@@ -669,22 +926,30 @@ class _AyahBottomSheet extends StatelessWidget {
                   textAlign: TextAlign.right,
                   style: GoogleFonts.lateef(
                     textStyle: const TextStyle(
-                        fontSize: 26, height: 1.8, color: Colors.black87),
+                        fontSize: 28, height: 2.0,
+                        color: AppColors.textPrimary),
                   ),
                 ),
               ),
-              const Divider(height: 24),
+              const Divider(height: 24, color: AppColors.border),
             ],
 
             // Translation
             if (dims.contains('translate')) ...[
-              _SheetLabel('Translation'),
+              const Text(
+                'TRANSLATION',
+                style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700,
+                  color: AppColors.textSecondary, letterSpacing: 0.8,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 getVerseTranslation(surah, ayah,
                     translation: Translation.enSaheeh),
-                style: TextStyle(
-                    fontSize: 14, height: 1.65, color: Colors.grey[800]),
+                style: const TextStyle(
+                    fontSize: 14, height: 1.65,
+                    color: AppColors.textSecondary),
               ),
               const SizedBox(height: 16),
             ],
@@ -697,7 +962,13 @@ class _AyahBottomSheet extends StatelessWidget {
 
             // Audio
             if (dims.contains('memorize')) ...[
-              _SheetLabel('Memorize'),
+              const Text(
+                'MEMORIZE',
+                style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700,
+                  color: AppColors.textSecondary, letterSpacing: 0.8,
+                ),
+              ),
               const SizedBox(height: 8),
               _JourneyAudioPlayer(
                 key: ValueKey('sheet_${surah}_$ayah'),
@@ -817,7 +1088,7 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
 
     await Navigator.push(
       ctx,
-      MaterialPageRoute(
+      AppRoute(
         builder: (_) => NewAudio(
           widget.surah,
           result.files.single,
@@ -838,11 +1109,10 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
       surahNameEnglish: getSurahName(widget.surah),
       onSelected: (audio) async {
         _saveAudio(audio);
-        // Scholar downloads have no verse timings yet — go straight to sync.
         if (ctx.mounted) {
           await Navigator.push(
             ctx,
-            MaterialPageRoute(
+            AppRoute(
               builder: (_) =>
                   AudioTrainingScreen(audio, onUpdate: _updateAudio),
             ),
@@ -871,7 +1141,7 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
     if (_surahAudio == null) return;
     await Navigator.push(
       ctx,
-      MaterialPageRoute(
+      AppRoute(
         builder: (_) =>
             AudioTrainingScreen(_surahAudio!, onUpdate: _updateAudio),
       ),
@@ -889,20 +1159,20 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.grey[50],
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.grey[200]!),
+          border: const Border.fromBorderSide(BorderSide(color: AppColors.border)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Icon(Icons.headphones_outlined,
-                  size: 16, color: Colors.grey[400]),
+              const Icon(Icons.headphones_outlined,
+                  size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 6),
-              Text(
+              const Text(
                 'No recitation set up',
-                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
               ),
             ]),
             const SizedBox(height: 10),
@@ -941,13 +1211,13 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.amber[50],
+          color: const Color(0xFFFFFBF0),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.amber[200]!),
+          border: Border.all(color: AppColors.gold.withValues(alpha: 0.4)),
         ),
         child: Row(
           children: [
-            Icon(Icons.music_note, color: Colors.amber[700], size: 20),
+            Icon(Icons.music_note, color: AppColors.gold, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -963,15 +1233,16 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
                   ),
                   Text(
                     'Verses not synced yet',
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.amber[700]),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.gold.withValues(alpha: 0.8)),
                   ),
                 ],
               ),
             ),
             TextButton(
               style: TextButton.styleFrom(
-                foregroundColor: Colors.amber[800],
+                foregroundColor: AppColors.primary,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -988,9 +1259,9 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.primaryColor.withOpacity(0.06),
+        color: AppColors.primary.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.primaryColor.withOpacity(0.2)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -999,7 +1270,7 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
             onTap: _playing ? _pause : _play,
             child: Icon(
               _playing ? Icons.pause_circle_filled : Icons.play_circle_filled,
-              color: AppColors.primaryColor,
+              color: AppColors.primary,
               size: 44,
             ),
           ),
@@ -1011,11 +1282,13 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
                 Text(
                   _playing ? 'Playing ayah ${widget.ayah}…' : 'Ayah ${widget.ayah}',
                   style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600),
+                      fontSize: 14, fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary),
                 ),
                 Text(
                   _surahAudio!.reciterName,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary),
                 ),
               ],
             ),
@@ -1025,46 +1298,10 @@ class _JourneyAudioPlayerState extends State<_JourneyAudioPlayer> {
             tooltip: 'Replay',
             onPressed: _play,
             icon: Icon(Icons.replay,
-                color: AppColors.primaryColor.withOpacity(0.8), size: 22),
+                color: AppColors.primary.withValues(alpha: 0.8), size: 22),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AudioInfoBox extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor, bgColor, borderColor, textColor;
-  final String message;
-
-  const _AudioInfoBox({
-    required this.icon,
-    required this.iconColor,
-    required this.bgColor,
-    required this.borderColor,
-    required this.message,
-    required this.textColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: borderColor),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: iconColor, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Text(message,
-                  style: TextStyle(fontSize: 13, color: textColor))),
         ],
       ),
     );
@@ -1075,7 +1312,6 @@ class _AudioInfoBox extends StatelessWidget {
 // Small shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Compact tappable button used in the audio source picker.
 class _AudioSourceButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1094,22 +1330,22 @@ class _AudioSourceButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: AppColors.primaryColor.withOpacity(0.07),
+          color: AppColors.primary.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(8),
-          border:
-              Border.all(color: AppColors.primaryColor.withOpacity(0.2)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: AppColors.primaryColor),
+            Icon(icon, size: 18, color: AppColors.primary),
             const SizedBox(height: 4),
+            const SizedBox(width: 4),
             Text(
               label,
               style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: AppColors.primaryColor,
+                color: AppColors.primary,
               ),
             ),
           ],
@@ -1119,74 +1355,27 @@ class _AudioSourceButton extends StatelessWidget {
   }
 }
 
-class _SectionCard extends StatelessWidget {
-  final String? label;
-  final Widget child;
-  const _SectionCard({this.label, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.grey[200]!)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (label != null) ...[
-              Text(
-                label!.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 10, fontWeight: FontWeight.w700,
-                  color: Colors.grey[500], letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
-            child,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SheetLabel extends StatelessWidget {
-  final String text;
-  const _SheetLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) => Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 10, fontWeight: FontWeight.w700,
-          color: Colors.grey[500], letterSpacing: 0.8,
-        ),
-      );
-}
-
 class _DoneBadge extends StatelessWidget {
+  const _DoneBadge();
+
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.teal[50],
+          color: AppColors.gold.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.teal[200]!),
+          border: Border.all(color: AppColors.gold.withValues(alpha: 0.5)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check_circle, size: 13, color: Colors.teal[600]),
+            Icon(Icons.check_circle, size: 13, color: AppColors.gold),
             const SizedBox(width: 4),
             Text(
               'Done',
               style: TextStyle(
                   fontSize: 12,
-                  color: Colors.teal[700],
+                  color: AppColors.gold,
                   fontWeight: FontWeight.w600),
             ),
           ],

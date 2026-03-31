@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class NavUtils {
   static void navTo(BuildContext context, Widget dest, {Function(dynamic)? onReturn}) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => dest),
+      AppRoute(builder: (context) => dest),
     ).then((value) {
       if(onReturn != null){
         onReturn(value);
@@ -15,7 +16,7 @@ class NavUtils {
   static void navToReplace(BuildContext context, Widget dest, {Function(dynamic)? onReturn}) {
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => dest),
+      AppRoute(builder: (context) => dest),
     ).then((value) {
       if(onReturn != null){
         onReturn(value);

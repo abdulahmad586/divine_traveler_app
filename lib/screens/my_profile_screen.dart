@@ -2,12 +2,30 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:tahfeex/resources/resources.dart';
+import 'package:tahfeex/screens/audio_surahs_screen.dart';
+import 'package:tahfeex/screens/companions_screen.dart';
+import 'package:tahfeex/screens/journey_list_screen.dart';
 import 'package:tahfeex/service/auth_service.dart';
 import 'package:tahfeex/service/states/states.dart';
+import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
+import 'package:tahfeex/shared/progression/user_progression.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class MyProfileScreen extends StatelessWidget {
   const MyProfileScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider<ProfileCubit>(
+      create: (_) => ProfileCubit(),
+      child: const _MyProfileView(),
+    );
+  }
+}
+
+class _MyProfileView extends StatelessWidget {
+  const _MyProfileView();
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +36,7 @@ class MyProfileScreen extends StatelessWidget {
         if (state.isLoading && state.user == null) {
           return const Scaffold(
             body: Center(
-              child: CircularProgressIndicator(color: AppColors.primaryColor),
+              child: CircularProgressIndicator(color: AppColors.primary),
             ),
           );
         }
@@ -30,11 +48,13 @@ class MyProfileScreen extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.cloud_off, size: 40, color: Colors.grey),
+                  const Icon(Icons.cloud_off,
+                      size: 40, color: AppColors.textSecondary),
                   const SizedBox(height: 10),
                   Text(state.error!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.grey)),
+                      style:
+                          const TextStyle(color: AppColors.textSecondary)),
                   const SizedBox(height: 14),
                   OutlinedButton(
                       onPressed: cubit.load, child: const Text('Retry')),
@@ -44,9 +64,9 @@ class MyProfileScreen extends StatelessWidget {
           );
         }
 
-        final user = state.user!;
+        final user        = state.user!;
         final firebaseUser = FirebaseAuth.instance.currentUser;
-        final photoUrl = firebaseUser?.photoURL;
+        final photoUrl    = firebaseUser?.photoURL;
 
         return Scaffold(
           appBar: AppBar(
@@ -67,22 +87,25 @@ class MyProfileScreen extends StatelessWidget {
             ],
           ),
           body: RefreshIndicator(
-            color: AppColors.primaryColor,
+            color: AppColors.primary,
             onRefresh: cubit.load,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 28, 20, 40),
+              padding: const EdgeInsets.fromLTRB(
+                AppSizes.pagePadding, 28,
+                AppSizes.pagePadding, 40,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Avatar + name ────────────────────────────────────────
+                  // ── Avatar + name + email ────────────────────────────────
                   Center(
                     child: Column(
                       children: [
                         CircleAvatar(
                           radius: 40,
                           backgroundColor:
-                              AppColors.primaryColor.withValues(alpha: 0.15),
+                              AppColors.primary.withValues(alpha: 0.12),
                           backgroundImage: photoUrl != null
                               ? NetworkImage(photoUrl)
                               : null,
@@ -92,7 +115,7 @@ class MyProfileScreen extends StatelessWidget {
                                   style: const TextStyle(
                                     fontSize: 32,
                                     fontWeight: FontWeight.bold,
-                                    color: AppColors.primaryColor,
+                                    color: AppColors.primary,
                                   ),
                                 )
                               : null,
@@ -101,34 +124,101 @@ class MyProfileScreen extends StatelessWidget {
                         Text(
                           user.name,
                           style: const TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.bold),
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           user.email,
-                          style: TextStyle(
-                              fontSize: 13, color: Colors.grey[600]),
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textSecondary),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '@${user.username}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.primaryMuted,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 32),
 
-                  // ── Username ─────────────────────────────────────────────
-                  _sectionLabel('USERNAME'),
+                  // ── My Journeys ──────────────────────────────────────────
+                  _sectionLabel('JOURNEYS'),
+                  _NavRow(
+                    icon: Icons.route_outlined,
+                    label: 'My Journeys',
+                    onTap: () => Navigator.push(
+                      context,
+                      AppRoute(
+                          builder: (_) => const JourneyListScreen()),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _NavRow(
+                    icon: Icons.people_outline,
+                    label: 'Companions',
+                    subtitle: 'Journeying together',
+                    onTap: () => Navigator.push(
+                      context,
+                      AppRoute(
+                          builder: (_) => const CompanionsScreen()),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Contributions ────────────────────────────────────────
+                  if (UserProgression().hasCompletedJourney) ...[
+                    _sectionLabel('CONTRIBUTIONS'),
+                    _NavRow(
+                      icon: Icons.headphones_outlined,
+                      label: 'Audio Recordings',
+                      subtitle: 'Manage your contributed recitations',
+                      onTap: () => Navigator.push(
+                        context,
+                        AppRoute(
+                            builder: (_) => const AudioSurahScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // ── Account ──────────────────────────────────────────────
+                  _sectionLabel('ACCOUNT'),
                   _InfoCard(
                     child: Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            '@${user.username}',
-                            style: const TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w500),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Username',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.textPrimary),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '@${user.username}',
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary),
+                              ),
+                            ],
                           ),
                         ),
                         TextButton(
-                          onPressed: () =>
-                              _showEditUsernameDialog(context, cubit, user.username),
+                          onPressed: () => _showEditUsernameDialog(
+                              context, cubit, user.username),
                           child: const Text('Change'),
                         ),
                       ],
@@ -149,13 +239,15 @@ class MyProfileScreen extends StatelessWidget {
                                 'Allow companion requests',
                                 style: TextStyle(
                                     fontSize: 14,
-                                    fontWeight: FontWeight.w500),
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.textPrimary),
                               ),
                               const SizedBox(height: 2),
-                              Text(
+                              const Text(
                                 'Others can send you companion requests',
                                 style: TextStyle(
-                                    fontSize: 12, color: Colors.grey[600]),
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary),
                               ),
                             ],
                           ),
@@ -165,7 +257,7 @@ class MyProfileScreen extends StatelessWidget {
                           onChanged: state.isSaving
                               ? null
                               : (_) => cubit.toggleAllowFriendRequests(),
-                          activeTrackColor: AppColors.primaryColor,
+                          activeTrackColor: AppColors.primary,
                         ),
                       ],
                     ),
@@ -174,8 +266,8 @@ class MyProfileScreen extends StatelessWidget {
                   if (state.saveError != null) ...[
                     const SizedBox(height: 8),
                     Text(state.saveError!,
-                        style:
-                            const TextStyle(color: Colors.red, fontSize: 12)),
+                        style: const TextStyle(
+                            color: Colors.red, fontSize: 12)),
                   ],
                   const SizedBox(height: 32),
 
@@ -189,7 +281,8 @@ class MyProfileScreen extends StatelessWidget {
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red[400],
                         side: BorderSide(color: Colors.red[300]!),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
                       ),
@@ -208,10 +301,10 @@ class MyProfileScreen extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 10),
         child: Text(
           text,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
-            color: Colors.grey[500],
+            color: AppColors.textSecondary,
             letterSpacing: 0.8,
           ),
         ),
@@ -225,6 +318,70 @@ class MyProfileScreen extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (_) => _EditUsernameDialog(cubit: cubit, current: current),
+    );
+  }
+}
+
+// ── Navigation row ────────────────────────────────────────────────────────────
+
+class _NavRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  const _NavRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.cardSurface,
+          borderRadius: BorderRadius.circular(12),
+          border: const Border.fromBorderSide(
+              BorderSide(color: AppColors.border)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppColors.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right,
+                size: 20, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -263,10 +420,7 @@ class _EditUsernameDialogState extends State<_EditUsernameDialog> {
       Navigator.pop(context);
       return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() { _loading = true; _error = null; });
     try {
       await widget.cubit.updateUsername(value);
       if (!mounted) return;
@@ -279,10 +433,7 @@ class _EditUsernameDialogState extends State<_EditUsernameDialog> {
             : e.message;
       });
     } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
+      setState(() { _loading = false; _error = e.toString(); });
     }
   }
 
@@ -321,7 +472,7 @@ class _EditUsernameDialogState extends State<_EditUsernameDialog> {
         FilledButton(
           onPressed: _loading ? null : _save,
           style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primaryColor),
+              backgroundColor: AppColors.primary),
           child: _loading
               ? const SizedBox(
                   width: 18,
@@ -347,9 +498,10 @@ class _InfoCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: const Border.fromBorderSide(
+            BorderSide(color: AppColors.border)),
       ),
       child: child,
     );

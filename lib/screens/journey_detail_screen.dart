@@ -10,6 +10,8 @@ import 'package:tahfeex/screens/quran_journey_screen.dart';
 import 'package:tahfeex/service/alarm_service.dart';
 import 'package:tahfeex/service/app_storage.dart';
 import 'package:tahfeex/service/states/states.dart';
+import 'package:tahfeex/widgets/animated_progress_bar.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 
 class JourneyDetailScreen extends StatelessWidget {
@@ -485,14 +487,10 @@ class _ProgressCard extends StatelessWidget {
                         color: Colors.grey[600], fontSize: 13),
                   ),
                   const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: fraction,
-                      minHeight: 6,
-                      backgroundColor: Colors.grey[200],
-                      color: color,
-                    ),
+                  AnimatedProgressBar(
+                    value: fraction,
+                    minHeight: 6,
+                    color: color,
                   ),
                 ],
               ),
@@ -630,20 +628,17 @@ class _MembersSection extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: 4),
-                          ClipRRect(
+                          AnimatedProgressBar(
+                            value: fraction,
+                            minHeight: 5,
                             borderRadius: BorderRadius.circular(3),
-                            child: LinearProgressIndicator(
-                              value: fraction,
-                              minHeight: 5,
-                              backgroundColor: Colors.grey[200],
-                              color: fraction >= 1.0
-                                  ? Colors.teal
-                                  : AppColors.primaryColor,
-                            ),
+                            color: fraction >= 1.0
+                                ? Colors.teal
+                                : AppColors.primaryColor,
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${member.completedCount}/${journey.totalAyahs} · $percent%',
+                            '${member.completedCount} of ${journey.totalAyahs} ayahs',
                             style: TextStyle(
                                 fontSize: 11, color: Colors.grey[500]),
                           ),
@@ -656,12 +651,8 @@ class _MembersSection extends StatelessWidget {
                       IconButton(
                         icon: const Icon(Icons.notifications_outlined, size: 20),
                         color: AppColors.primaryColor,
-                        tooltip: 'Nudge ${member.name.isNotEmpty ? member.name : member.username}',
-                        onPressed: () => _nudge(
-                          context,
-                          member.userId,
-                          member.name.isNotEmpty ? member.name : '@${member.username}',
-                        ),
+                        tooltip: 'Send a gentle reminder',
+                        onPressed: () => _nudge(context, member.userId),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -692,12 +683,12 @@ class _MembersSection extends StatelessWidget {
     );
   }
 
-  Future<void> _nudge(BuildContext context, String memberId, String displayName) async {
+  Future<void> _nudge(BuildContext context, String memberId) async {
     try {
       await cubit.nudge(memberId);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Nudge sent to $displayName!')),
+          const SnackBar(content: Text('A gentle reminder sent.')),
         );
       }
     } catch (e) {
@@ -867,16 +858,13 @@ class _SurahSummaryRow extends StatelessWidget {
                           fontWeight: FontWeight.w600, fontSize: 13),
                     ),
                     const SizedBox(height: 4),
-                    ClipRRect(
+                    AnimatedProgressBar(
+                      value: fraction,
+                      minHeight: 5,
                       borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: fraction,
-                        minHeight: 5,
-                        backgroundColor: Colors.grey[200],
-                        color: fraction >= 1.0
-                            ? Colors.teal
-                            : AppColors.primaryColor,
-                      ),
+                      color: fraction >= 1.0
+                          ? Colors.teal
+                          : AppColors.primaryColor,
                     ),
                   ],
                 ),
@@ -1082,7 +1070,7 @@ class _MemberActions extends StatelessWidget {
   Future<void> _openJourneyScreen(BuildContext context) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      AppRoute(
           builder: (_) => QuranJourneyScreen(journeyId: journey.id)),
     );
     cubit.load(); // refresh detail after returning

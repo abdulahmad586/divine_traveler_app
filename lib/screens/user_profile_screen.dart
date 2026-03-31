@@ -6,6 +6,7 @@ import 'package:tahfeex/model/journey_model.dart';
 import 'package:tahfeex/resources/resources.dart';
 import 'package:tahfeex/screens/journey_detail_screen.dart';
 import 'package:tahfeex/service/states/states.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class UserProfileScreen extends StatelessWidget {
   final String username;
@@ -447,7 +448,7 @@ class _JourneyTile extends StatelessWidget {
     return GestureDetector(
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute(
+        AppRoute(
             builder: (_) => JourneyDetailScreen(journeyId: journey.id)),
       ),
       child: Container(

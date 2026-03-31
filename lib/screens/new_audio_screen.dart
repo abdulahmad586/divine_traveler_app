@@ -134,7 +134,7 @@ class _NewAudioState extends State<NewAudio> {
       if (!context.mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
+        AppRoute(
           builder: (_) => AudioTrainingScreen(
             newAudio,
             onUpdate: widget.onTrainingUpdate,

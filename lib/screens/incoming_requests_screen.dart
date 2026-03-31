@@ -19,19 +19,9 @@ class IncomingRequestsScreen extends StatelessWidget {
           ),
           body: requests.isEmpty
               ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.inbox_outlined, size: 48, color: Colors.grey),
-                      SizedBox(height: 12),
-                      Text(
-                        'No incoming requests',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey),
-                      ),
-                    ],
+                  child: Text(
+                    'No requests right now.',
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
                   ),
                 )
               : ListView.separated(
@@ -48,11 +38,11 @@ class IncomingRequestsScreen extends StatelessWidget {
                         children: [
                           CircleAvatar(
                             backgroundColor:
-                                AppColors.primaryColor.withValues(alpha: 0.15),
+                                AppColors.primary.withValues(alpha: 0.15),
                             child: Text(
                               req.fromUsername[0].toUpperCase(),
                               style: const TextStyle(
-                                  color: AppColors.primaryColor,
+                                  color: AppColors.primary,
                                   fontWeight: FontWeight.bold),
                             ),
                           ),
@@ -78,7 +68,7 @@ class IncomingRequestsScreen extends StatelessWidget {
                                 ? null
                                 : () => cubit.acceptRequest(req.id),
                             style: FilledButton.styleFrom(
-                                backgroundColor: AppColors.primaryColor),
+                                backgroundColor: AppColors.primary),
                             child: state.actingRequestId == req.id
                                 ? const SizedBox(
                                     width: 18,

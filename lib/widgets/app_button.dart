@@ -63,8 +63,8 @@ class AppButton extends StatelessWidget {
 
                         colors: [
                           Color(0xff191a19),
-                          AppColors.accentColor,
-                          AppColors.primaryColor,
+                          AppColors.gold,
+                          AppColors.primary,
                           Color(0xffd8e9a8),
                         ],
                         strokeWidth: 2,

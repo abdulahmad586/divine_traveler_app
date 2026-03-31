@@ -56,7 +56,7 @@ class ArabicTextSizeSettings extends StatelessWidget {
                   startAngle: 90,
                   sweepAngle: 180,
                   strokeCap: StrokeCap.round,
-                  progressGradientColors: const [AppColors.primaryColor, AppColors.accentColor, Colors.purple],
+                  progressGradientColors: const [AppColors.primary, AppColors.gold, Colors.purple],
                   dashWidth: 50,
                   dashGap: 15,
                   valueNotifier: progressChange,

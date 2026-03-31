@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quran/quran.dart';
 import 'package:tahfeex/screens/screens.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class AudioSurahScreen extends StatelessWidget {
   static String routeId="audio-surah-screen";
@@ -25,7 +26,7 @@ class AudioSurahScreen extends StatelessWidget {
                   return AudioSurahListItem(index+1, onTap: (){
                     Navigator.push(
                         context,
-                        MaterialPageRoute(
+                        AppRoute(
                             builder: (context) => AudioFilesScreen(surahNumber: index+1)));
                   },);
                 })

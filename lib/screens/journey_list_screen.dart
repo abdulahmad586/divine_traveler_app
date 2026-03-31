@@ -4,8 +4,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:tahfeex/model/models.dart';
 import 'package:tahfeex/resources/resources.dart';
 import 'package:tahfeex/service/states/states.dart';
-import 'package:tahfeex/screens/create_journey_screen.dart';
+import 'package:tahfeex/shared/constants/constants.dart';
+import 'package:tahfeex/screens/journey_template_screen.dart';
 import 'package:tahfeex/screens/journey_detail_screen.dart';
+import 'package:tahfeex/widgets/animated_progress_bar.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class JourneyListScreen extends StatelessWidget {
   const JourneyListScreen({super.key});
@@ -124,9 +127,12 @@ class _JourneyListView extends StatelessWidget {
 
   Future<void> _openCreate(
       BuildContext context, JourneyListCubit cubit) async {
+    final journeys = cubit.state.journeys ?? [];
     final created = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(builder: (_) => const CreateJourneyScreen()),
+      AppRoute(
+        builder: (_) => JourneyTemplateScreen(existingJourneys: journeys),
+      ),
     );
     if (created == true) cubit.load();
   }
@@ -135,7 +141,7 @@ class _JourneyListView extends StatelessWidget {
       BuildContext context, JourneyListCubit cubit, String id) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => JourneyDetailScreen(journeyId: id)),
+      AppRoute(builder: (_) => JourneyDetailScreen(journeyId: id)),
     );
     cubit.load();
   }
@@ -157,34 +163,33 @@ class JourneyEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.route_outlined, size: 72,
-                color: AppColors.primaryColor.withOpacity(0.4)),
-            const SizedBox(height: 16),
-            Text('No journeys yet',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(
-              'A journey tracks your progress through a range of Quran verses across one or more dimensions — reading, memorizing, translating, or commentary.',
+            const Text(
+              'Begin with a short journey.\nConsistency matters more than speed.',
               textAlign: TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 24, vertical: 12),
+              style: TextStyle(
+                fontSize: 17,
+                height: 1.65,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w500,
               ),
-              onPressed: onCreateTap,
-              icon: const Icon(Icons.add),
-              label: const Text('Start your first journey'),
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              height: AppSizes.buttonHeight,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppSizes.buttonRadius),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: onCreateTap,
+                child: const Text('Start a Journey',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              ),
             ),
           ],
         ),
@@ -284,14 +289,10 @@ class JourneyCard extends StatelessWidget {
               const SizedBox(height: 12),
 
               // Progress bar (your progress)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: progressFraction,
-                  minHeight: 6,
-                  backgroundColor: Colors.grey[200],
-                  color: _progressColor(myStatus),
-                ),
+              AnimatedProgressBar(
+                value: progressFraction,
+                minHeight: 6,
+                color: _progressColor(myStatus),
               ),
               const SizedBox(height: 6),
               Row(

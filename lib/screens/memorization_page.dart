@@ -244,7 +244,7 @@ class _MemorizationScreenState extends State<MemorizationScreen> {
       if (context.mounted) {
         Navigator.push(
             context,
-            MaterialPageRoute(
+            AppRoute(
                 builder: (ct) => NewAudio(
                       surahNumber,
                       result.files.single,
@@ -929,7 +929,7 @@ class _MemorizationScreenState extends State<MemorizationScreen> {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
+                    AppRoute(
                       builder: (_) =>
                           AudioFilesScreen(surahNumber: surahNumber),
                     ),

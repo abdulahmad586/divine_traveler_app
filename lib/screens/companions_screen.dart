@@ -5,7 +5,9 @@ import 'package:tahfeex/resources/resources.dart';
 import 'package:tahfeex/screens/incoming_requests_screen.dart';
 import 'package:tahfeex/screens/user_profile_screen.dart';
 import 'package:tahfeex/service/states/states.dart';
+import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class CompanionsScreen extends StatelessWidget {
   const CompanionsScreen({super.key});
@@ -21,7 +23,7 @@ class CompanionsScreen extends StatelessWidget {
             actions: [
               if (state.isLoading && state.companions != null)
                 const Padding(
-                  padding: EdgeInsets.only(right: 8),
+                  padding: EdgeInsets.only(right: 16),
                   child: Center(
                     child: SizedBox(
                       width: 18,
@@ -31,15 +33,10 @@ class CompanionsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-              _IncomingBadge(
-                count: state.incomingCount,
-                onTap: () => _openIncoming(context, cubit),
-              ),
-              const SizedBox(width: 8),
             ],
           ),
           body: RefreshIndicator(
-            color: AppColors.primaryColor,
+            color: AppColors.primary,
             onRefresh: cubit.load,
             child: _buildBody(context, state, cubit),
           ),
@@ -55,7 +52,7 @@ class CompanionsScreen extends StatelessWidget {
   ) {
     if (state.isLoading && state.companions == null) {
       return const Center(
-        child: CircularProgressIndicator(color: AppColors.primaryColor),
+        child: CircularProgressIndicator(color: AppColors.primary),
       );
     }
 
@@ -93,8 +90,8 @@ class CompanionsScreen extends StatelessWidget {
             icon: const Icon(Icons.person_add_outlined),
             label: const Text('Add Companion'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primaryColor,
-              side: const BorderSide(color: AppColors.primaryColor),
+              foregroundColor: AppColors.primary,
+              side: const BorderSide(color: AppColors.primary),
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
@@ -102,26 +99,67 @@ class CompanionsScreen extends StatelessWidget {
           ),
         ),
 
+        // ── Incoming requests card ─────────────────────────────────────────
+        if (state.incomingCount > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: InkWell(
+              onTap: () => _openIncoming(context, cubit),
+              borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(AppSizes.cardRadius),
+                  border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.people_outline,
+                        size: 18, color: AppColors.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${state.incomingCount} pending companion ${state.incomingCount == 1 ? 'request' : 'requests'}',
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right,
+                        size: 18, color: AppColors.textSecondary),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
         if (companions.isEmpty)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 60),
+            padding: EdgeInsets.symmetric(vertical: 60, horizontal: 32),
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.people_outline, size: 52, color: Colors.grey),
+                  Icon(Icons.people_outline,
+                      size: 52, color: AppColors.textSecondary),
                   SizedBox(height: 12),
                   Text(
-                    'No companions yet',
+                    'Companions join you on the path.',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
-                        color: Colors.grey),
+                        color: AppColors.textPrimary),
                   ),
                   SizedBox(height: 6),
                   Text(
-                    'Add companions to follow their progress',
-                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                    'Invite someone when you\'re ready.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 13, color: AppColors.textSecondary),
                   ),
                 ],
               ),
@@ -150,7 +188,7 @@ class CompanionsScreen extends StatelessWidget {
       BuildContext context, CompanionsCubit cubit, String username) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => UserProfileScreen(username: username)),
+      AppRoute(builder: (_) => UserProfileScreen(username: username)),
     );
     cubit.load(); // refresh after returning (companion may have been removed)
   }
@@ -159,7 +197,7 @@ class CompanionsScreen extends StatelessWidget {
       BuildContext context, CompanionsCubit cubit) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      AppRoute(
         builder: (_) => BlocProvider.value(
           value: cubit,
           child: const IncomingRequestsScreen(),
@@ -182,11 +220,11 @@ class _CompanionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: AppColors.primaryColor.withValues(alpha: 0.15),
+        backgroundColor: AppColors.primary.withValues(alpha: 0.15),
         child: Text(
           companion.initial,
           style: const TextStyle(
-              color: AppColors.primaryColor, fontWeight: FontWeight.bold),
+              color: AppColors.primary, fontWeight: FontWeight.bold),
         ),
       ),
       title: Text(companion.name,
@@ -195,49 +233,6 @@ class _CompanionTile extends StatelessWidget {
           style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       trailing: const Icon(Icons.chevron_right, color: Colors.grey),
       onTap: onTap,
-    );
-  }
-}
-
-// ── Incoming requests badge ───────────────────────────────────────────────────
-
-class _IncomingBadge extends StatelessWidget {
-  final int count;
-  final VoidCallback onTap;
-
-  const _IncomingBadge({required this.count, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: 'Companion requests',
-      onPressed: onTap,
-      icon: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          const Icon(Icons.notifications_outlined),
-          if (count > 0)
-            Positioned(
-              top: -4,
-              right: -4,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: const BoxDecoration(
-                    color: Colors.red, shape: BoxShape.circle),
-                constraints:
-                    const BoxConstraints(minWidth: 16, minHeight: 16),
-                child: Text(
-                  '$count',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-        ],
-      ),
     );
   }
 }
@@ -341,7 +336,7 @@ class _AddCompanionDialogState extends State<_AddCompanionDialog> {
         FilledButton(
           onPressed: _loading ? null : _submit,
           style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primaryColor),
+              backgroundColor: AppColors.primary),
           child: _loading
               ? const SizedBox(
                   width: 18,

@@ -12,6 +12,7 @@ export 'package:tahfeex/screens/login_screen.dart';
 export 'package:tahfeex/screens/upload_progress_sheet.dart';
 export 'package:tahfeex/screens/journey_list_screen.dart';
 export 'package:tahfeex/screens/create_journey_screen.dart';
+export 'package:tahfeex/screens/journey_template_screen.dart';
 export 'package:tahfeex/screens/journey_detail_screen.dart';
 export 'package:tahfeex/screens/quran_journey_screen.dart';
 export 'package:tahfeex/screens/scholar_audio_picker.dart';
