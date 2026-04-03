@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:tahfeex/model/models.dart';
+import 'package:tahfeex/service/app_storage.dart';
 import 'package:tahfeex/service/repositories/journey_repository.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,25 +15,33 @@ class JourneyListCubit extends Cubit<JourneyListState> {
   }
 
   Future<void> load() async {
-    emit(state.copyWith(isLoading: true, clearError: true));
+    // Serve cached data immediately so the UI renders without a blank screen.
+    final cached = AppStorage().getJourneyListCache();
+    if (cached != null) {
+      final cachedJourneys = cached.map((e) => Journey.fromMap(e)).toList();
+      emit(state.copyWith(
+          isLoading: true, journeys: cachedJourneys, clearError: true));
+    } else {
+      emit(state.copyWith(isLoading: true, clearError: true));
+    }
     try {
       final journeys = await _repo.getJourneys();
+      AppStorage().setJourneyListCache(journeys.map((j) => j.toMap()).toList());
       emit(state.copyWith(isLoading: false, journeys: journeys));
     } catch (e) {
-      emit(state.copyWith(isLoading: false, error: e.toString()));
+      emit(state.copyWith(
+          isLoading: false, error: cached == null ? e.toString() : null));
     }
   }
 
   /// Count of active memberships (not created journeys) for the 5-journey cap.
   /// Pass [myUid] to count based on the current user's own member status.
   int activeCount(String myUid) {
-    return state.journeys
-            ?.where((j) {
-              final m = j.memberFor(myUid);
-              if (m == null) return false;
-              return m.isActive || m.isPaused || m.isDelayed;
-            })
-            .length ??
+    return state.journeys?.where((j) {
+          final m = j.memberFor(myUid);
+          if (m == null) return false;
+          return m.isActive || m.isPaused || m.isDelayed;
+        }).length ??
         0;
   }
 
@@ -57,9 +66,9 @@ class JourneyListState {
     bool clearError = false,
   }) =>
       JourneyListState(
-        journeys:  journeys  ?? this.journeys,
+        journeys: journeys ?? this.journeys,
         isLoading: isLoading ?? this.isLoading,
-        error:     clearError ? null : (error ?? this.error),
+        error: clearError ? null : (error ?? this.error),
       );
 }
 
@@ -76,44 +85,56 @@ class JourneyDetailCubit extends Cubit<JourneyDetailState> {
   }
 
   Future<void> load() async {
-    emit(state.copyWith(isLoading: true, clearError: true));
+    // Serve cached data immediately so the UI renders without a blank screen.
+    final cached = AppStorage().getJourneyCache(journeyId);
+    if (cached != null) {
+      emit(state.copyWith(
+          isLoading: true, journey: Journey.fromMap(cached), clearError: true));
+    } else {
+      emit(state.copyWith(isLoading: true, clearError: true));
+    }
     try {
       final journey = await _repo.getJourneyById(journeyId);
+      AppStorage().setJourneyCache(journey.toMap());
       emit(state.copyWith(isLoading: false, journey: journey));
     } catch (e) {
-      emit(state.copyWith(isLoading: false, error: e.toString()));
+      emit(state.copyWith(
+          isLoading: false, error: cached == null ? e.toString() : null));
     }
   }
 
   /// Returns the updated journey. Throws [ApiException] on error — callers
   /// should handle JOURNEY_COMPLETED and JOURNEY_ABANDONED specially.
   Future<Journey> updateProgress({required int surah, int? ayah}) async {
-    final updated = await _repo.updateProgress(
-        id: journeyId, surah: surah, ayah: ayah);
+    final updated =
+        await _repo.updateProgress(id: journeyId, surah: surah, ayah: ayah);
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
     return updated;
   }
 
   Future<void> pause() async {
-    final updated =
-        await _repo.updateStatus(id: journeyId, status: 'paused');
+    final updated = await _repo.updateStatus(id: journeyId, status: 'paused');
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
   }
 
   Future<void> resume() async {
-    final updated =
-        await _repo.updateStatus(id: journeyId, status: 'active');
+    final updated = await _repo.updateStatus(id: journeyId, status: 'active');
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
   }
 
   Future<void> abandon() async {
     final updated =
         await _repo.updateStatus(id: journeyId, status: 'abandoned');
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
   }
 
   Future<void> join() async {
     final updated = await _repo.joinJourney(journeyId);
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
   }
 
@@ -124,6 +145,7 @@ class JourneyDetailCubit extends Cubit<JourneyDetailState> {
   Future<void> removeMember(String memberId) async {
     final updated =
         await _repo.removeMember(journeyId: journeyId, memberId: memberId);
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
   }
 
@@ -132,8 +154,9 @@ class JourneyDetailCubit extends Cubit<JourneyDetailState> {
   }
 
   Future<void> toggleAllowJoining({required bool allowJoining}) async {
-    final updated = await _repo.updateSettings(
-        id: journeyId, allowJoining: allowJoining);
+    final updated =
+        await _repo.updateSettings(id: journeyId, allowJoining: allowJoining);
+    AppStorage().setJourneyCache(updated.toMap());
     emit(state.copyWith(journey: updated));
   }
 }
@@ -156,8 +179,8 @@ class JourneyDetailState {
     bool clearError = false,
   }) =>
       JourneyDetailState(
-        journey:   journey   ?? this.journey,
+        journey: journey ?? this.journey,
         isLoading: isLoading ?? this.isLoading,
-        error:     clearError ? null : (error ?? this.error),
+        error: clearError ? null : (error ?? this.error),
       );
 }

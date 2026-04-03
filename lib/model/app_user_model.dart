@@ -13,13 +13,21 @@ class AppUser {
     required this.allowFriendRequests,
   });
 
-  factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
+  factory AppUser.fromJson(Map<dynamic, dynamic> json) => AppUser(
         id: json['id'] as String,
         name: json['name'] as String,
         email: json['email'] as String,
         username: json['username'] as String,
         allowFriendRequests: json['allowFriendRequests'] as bool? ?? true,
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'username': username,
+        'allowFriendRequests': allowFriendRequests,
+      };
 
   AppUser copyWith({String? username, bool? allowFriendRequests}) => AppUser(
         id: id,

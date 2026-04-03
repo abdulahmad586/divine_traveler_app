@@ -11,6 +11,7 @@ import 'package:tahfeex/service/alarm_service.dart';
 import 'package:tahfeex/service/app_storage.dart';
 import 'package:tahfeex/service/states/states.dart';
 import 'package:tahfeex/widgets/animated_progress_bar.dart';
+import 'package:tahfeex/widgets/app_dialog.dart';
 import 'package:tahfeex/widgets/app_route.dart';
 
 
@@ -702,19 +703,17 @@ class _MembersSection extends StatelessWidget {
   Future<void> _confirmRemove(BuildContext context, String memberId) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Remove member?'),
-        content: const Text(
-            'Their progress will be permanently deleted.'),
+      builder: (_) => AppDialog(
+        title: 'Remove member?',
+        body: 'Their progress will be permanently deleted.',
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
+          AppDialogAction(
+              label: 'Cancel',
+              onPressed: () => Navigator.pop(context, false)),
+          AppDialogAction(
+              label: 'Remove',
+              isDestructive: true,
+              onPressed: () => Navigator.pop(context, true)),
         ],
       ),
     );
@@ -735,10 +734,31 @@ class _MembersSection extends StatelessWidget {
 // Allow joining toggle (creator only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _AllowJoiningTile extends StatelessWidget {
+class _AllowJoiningTile extends StatefulWidget {
   final Journey journey;
   final JourneyDetailCubit cubit;
   const _AllowJoiningTile({required this.journey, required this.cubit});
+
+  @override
+  State<_AllowJoiningTile> createState() => _AllowJoiningTileState();
+}
+
+class _AllowJoiningTileState extends State<_AllowJoiningTile> {
+  bool _loading = false;
+
+  Future<void> _toggle(bool value) async {
+    setState(() => _loading = true);
+    try {
+      await widget.cubit.toggleAllowJoining(allowJoining: value);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -747,27 +767,27 @@ class _AllowJoiningTile extends StatelessWidget {
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: Colors.grey[200]!)),
-      child: SwitchListTile(
+      child: ListTile(
         title: const Text('Open to companions',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
         subtitle: Text(
-          journey.allowJoining
+          widget.journey.allowJoining
               ? 'Your companions can join this journey.'
               : 'Only current members can participate.',
           style: TextStyle(fontSize: 12, color: Colors.grey[600]),
         ),
-        value: journey.allowJoining,
-        activeColor: AppColors.primaryColor,
-        onChanged: (value) async {
-          try {
-            await cubit.toggleAllowJoining(allowJoining: value);
-          } catch (e) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(e.toString())));
-            }
-          }
-        },
+        trailing: _loading
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.primary),
+              )
+            : Switch(
+                value: widget.journey.allowJoining,
+                activeTrackColor: AppColors.primary,
+                onChanged: _toggle,
+              ),
       ),
     );
   }
@@ -1094,19 +1114,17 @@ class _MemberActions extends StatelessWidget {
   Future<void> _confirmAbandon(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Abandon this journey?'),
-        content: const Text(
-            'This cannot be undone. You will no longer be able to update progress.'),
+      builder: (_) => AppDialog(
+        title: 'Abandon this journey?',
+        body: 'This cannot be undone. You will no longer be able to update progress.',
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              style:
-                  TextButton.styleFrom(foregroundColor: Colors.red),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Abandon')),
+          AppDialogAction(
+              label: 'Cancel',
+              onPressed: () => Navigator.pop(context, false)),
+          AppDialogAction(
+              label: 'Abandon',
+              isDestructive: true,
+              onPressed: () => Navigator.pop(context, true)),
         ],
       ),
     );
@@ -1125,19 +1143,17 @@ class _MemberActions extends StatelessWidget {
   Future<void> _confirmLeave(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Leave this journey?'),
-        content: const Text(
-            'Your progress will be permanently deleted.'),
+      builder: (_) => AppDialog(
+        title: 'Leave this journey?',
+        body: 'Your progress will be permanently deleted.',
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              style:
-                  TextButton.styleFrom(foregroundColor: Colors.red),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Leave')),
+          AppDialogAction(
+              label: 'Cancel',
+              onPressed: () => Navigator.pop(context, false)),
+          AppDialogAction(
+              label: 'Leave',
+              isDestructive: true,
+              onPressed: () => Navigator.pop(context, true)),
         ],
       ),
     );
@@ -1448,8 +1464,8 @@ class _DayPickerDialogState extends State<_DayPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Repeat on'),
+    return AppDialog(
+      title: 'Repeat on',
       content: Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -1470,14 +1486,14 @@ class _DayPickerDialogState extends State<_DayPickerDialog> {
         }).toList(),
       ),
       actions: [
-        TextButton(
+        AppDialogAction(
+          label: 'Cancel',
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
         ),
-        TextButton(
-          onPressed: () =>
-              Navigator.pop(context, _selected.toList()),
-          child: const Text('Save'),
+        AppDialogAction(
+          label: 'Save',
+          isPrimary: true,
+          onPressed: () => Navigator.pop(context, _selected.toList()),
         ),
       ],
     );

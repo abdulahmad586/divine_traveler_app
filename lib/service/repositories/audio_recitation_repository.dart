@@ -31,4 +31,28 @@ class AudioRepository {
       throw Exception('Unexpected error: $e');
     }
   }
+
+  /// Fetch verse audio (all reciters for a specific verse)
+  Future<AudioResponse> getVerseAudio({
+    required int surahNo,
+    required int ayahNo,
+  }) async {
+    try {
+      final response = await dio.get(
+        'audio/$surahNo/$ayahNo.json',
+      );
+
+      return AudioResponse.fromJson(
+        response.data,
+        surahNo: surahNo,
+        ayahNo: ayahNo,
+      );
+    } on DioException catch (e) {
+      throw Exception(
+        e.response?.data?.toString() ?? 'Failed to fetch verse audio',
+      );
+    } catch (e) {
+      throw Exception('Unexpected error: $e');
+    }
+  }
 }

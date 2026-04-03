@@ -7,6 +7,7 @@ import 'package:tahfeex/service/repositories/journey_repository.dart';
 import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
 import 'package:tahfeex/shared/progression/user_progression.dart';
+import 'package:tahfeex/widgets/app_dialog.dart';
 import 'package:tahfeex/widgets/app_route.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ const _templates = [
     name: 'Memorization Path',
     description: 'Focused memorization with audio. Slower pace, deeper retention.',
     commitment: '3 ayahs/day',
-    dimensions: ['memorize'],
+    dimensions: ['read', 'memorize'],
     ayahsPerDay: 3,
   ),
   _Template(
@@ -280,6 +281,13 @@ class _RangePickerScreenState extends State<_RangePickerScreen> {
 
   DateTime get _effectiveDeadline => _customDeadline ?? _autoDeadline;
 
+  String get _dailyPaceLabel {
+    if (!_rangeValid) return '—';
+    final days = _effectiveDeadline.difference(DateTime.now()).inDays.clamp(1, 9999);
+    final perDay = (_totalAyahs / days).ceil();
+    return '$perDay ayah${perDay == 1 ? '' : 's'}/day';
+  }
+
   /// Human-readable duration label shown in the summary card.
   String get _durationLabel {
     if (!_rangeValid) return '—';
@@ -347,16 +355,15 @@ class _RangePickerScreenState extends State<_RangePickerScreen> {
       if (e.isMaxActiveJourneys) {
         await showDialog(
           context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Journey limit reached'),
-            content: const Text(
-              "You've reached the maximum of 5 active journeys. "
-              'Complete or abandon one before starting a new one.',
-            ),
+          builder: (_) => AppDialog(
+            title: 'Journey limit reached',
+            body: "You've reached the maximum of 5 active journeys. "
+                'Complete or abandon one before starting a new one.',
             actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK')),
+              AppDialogAction(
+                  label: 'OK',
+                  isPrimary: true,
+                  onPressed: () => Navigator.pop(context)),
             ],
           ),
         );
@@ -419,8 +426,8 @@ class _RangePickerScreenState extends State<_RangePickerScreen> {
                     // ── Summary card ─────────────────────────────────────────
                     if (_rangeValid) ...[
                       _SummaryCard(
-                        template: widget.template,
                         totalAyahs: _totalAyahs,
+                        paceLabel: _dailyPaceLabel,
                         durationLabel: _durationLabel,
                         isCustomDeadline: _customDeadline != null,
                       ),
@@ -634,14 +641,14 @@ class _PickerDropdown<T> extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  final _Template template;
   final int totalAyahs;
+  final String paceLabel;
   final String durationLabel;
   final bool isCustomDeadline;
 
   const _SummaryCard({
-    required this.template,
     required this.totalAyahs,
+    required this.paceLabel,
     required this.durationLabel,
     required this.isCustomDeadline,
   });
@@ -661,7 +668,7 @@ class _SummaryCard extends StatelessWidget {
         children: [
           _SummaryRow(label: 'Total ayahs', value: '$totalAyahs'),
           const SizedBox(height: 6),
-          _SummaryRow(label: 'Daily pace', value: template.commitment),
+          _SummaryRow(label: 'Daily pace', value: paceLabel),
           const SizedBox(height: 6),
           _SummaryRow(
             label: isCustomDeadline ? 'Deadline' : 'Estimated duration',

@@ -10,3 +10,4 @@ export 'package:tahfeex/widgets/arabic_page_viewer.dart';
 export 'package:tahfeex/widgets/arabic_text_size_settings.dart';
 export 'package:tahfeex/widgets/app_route.dart';
 export 'package:tahfeex/widgets/animated_progress_bar.dart';
+export 'package:tahfeex/widgets/app_dialog.dart';

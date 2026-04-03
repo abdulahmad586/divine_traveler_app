@@ -7,10 +7,23 @@ import 'package:tahfeex/screens/user_profile_screen.dart';
 import 'package:tahfeex/service/states/states.dart';
 import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
+import 'package:tahfeex/widgets/app_dialog.dart';
 import 'package:tahfeex/widgets/app_route.dart';
 
 class CompanionsScreen extends StatelessWidget {
   const CompanionsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => CompanionsCubit(),
+      child: const _CompanionsView(),
+    );
+  }
+}
+
+class _CompanionsView extends StatelessWidget {
+  const _CompanionsView();
 
   @override
   Widget build(BuildContext context) {
@@ -303,8 +316,8 @@ class _AddCompanionDialogState extends State<_AddCompanionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Add Companion'),
+    return AppDialog(
+      title: 'Add Companion',
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,6 +333,17 @@ class _AddCompanionDialogState extends State<_AddCompanionDialog> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _submit(),
           ),
+          if (_loading) ...[
+            const SizedBox(height: 12),
+            const Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.primary),
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!,
@@ -329,22 +353,14 @@ class _AddCompanionDialogState extends State<_AddCompanionDialog> {
         ],
       ),
       actions: [
-        TextButton(
+        AppDialogAction(
+          label: 'Cancel',
           onPressed: _loading ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
         ),
-        FilledButton(
+        AppDialogAction(
+          label: 'Send Request',
+          isPrimary: true,
           onPressed: _loading ? null : _submit,
-          style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary),
-          child: _loading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Text('Send Request'),
         ),
       ],
     );

@@ -19,6 +19,7 @@ import 'package:tahfeex/service/repositories/journey_repository.dart';
 import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
 import 'package:tahfeex/shared/progression/user_progression.dart';
+import 'package:tahfeex/shared/sync/progress_sync_queue.dart';
 import 'package:tahfeex/widgets/widgets.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,12 +47,72 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
   int _surah = 1;
   int _ayah = 1;
   _ViewMode _viewMode = _ViewMode.ayahCentric;
-  bool _completing = false;
 
   // Phase 3 state
   bool _glowing = false;
   bool _showAudio = false;
   bool _showTafsir = false;
+
+  // ── Daily progress ─────────────────────────────────────────────────────────
+  int _todayCount = 0;
+
+  int get _dailyGoal {
+    final j = _journey;
+    if (j == null) return 1;
+    final days = j.endDate.difference(j.startDate).inDays;
+    return days > 0 ? (j.totalAyahs / days).ceil() : j.totalAyahs;
+  }
+
+  /// Ayah keys (`'surah_ayah'`) marked locally but not yet confirmed by the
+  /// server. Overlaid on top of [_myMember] so all UI reflects them instantly.
+  Set<String> _localExtra = {};
+
+  /// [_myMember] merged with [_localExtra] — passed to all child widgets so
+  /// they automatically show optimistic completions.
+  JourneyMember? get _effectiveMember =>
+      _myMember?.withExtraCompletions(_localExtra);
+
+  // ── Focus / lock state ─────────────────────────────────────────────────────
+  bool _controlsVisible = true;
+  bool _locked = false;
+  Timer? _autoHideTimer;
+
+  void _scheduleAutoHide() {
+    _autoHideTimer?.cancel();
+    _autoHideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted && !_locked) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _revealControls() {
+    if (_locked) return;
+    if (!_controlsVisible) setState(() => _controlsVisible = true);
+    _scheduleAutoHide();
+  }
+
+  void _onContentTap() {
+    if (_locked) return;
+    if (_controlsVisible) {
+      _autoHideTimer?.cancel();
+      setState(() => _controlsVisible = false);
+    } else {
+      _revealControls();
+    }
+  }
+
+  void _toggleLock() {
+    setState(() {
+      if (_locked) {
+        _locked = false;
+        _controlsVisible = true;
+        _scheduleAutoHide();
+      } else {
+        _locked = true;
+        _autoHideTimer?.cancel();
+        _controlsVisible = false;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -59,42 +120,63 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
     _loadJourney();
   }
 
+  @override
+  void dispose() {
+    _autoHideTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadJourney() async {
     setState(() { _loading = true; _error = null; });
+    // Best-effort flush of any previously queued items while we wait for load.
+    ProgressSyncQueue().flush(_repo).ignore();
     try {
       final journey  = await _repo.getJourneyById(widget.journeyId);
       final myUid    = FirebaseAuth.instance.currentUser?.uid ?? '';
       final myMember = journey.memberFor(myUid);
-      final first    = _firstIncomplete(journey, myMember);
+
+      // Restore any pending local completions not yet reflected by the server.
+      final pending = ProgressSyncQueue().pendingFor(widget.journeyId);
+      final localExtra = pending
+          .where((k) => myMember?.completedAyahs[k] != true)
+          .toSet();
+
+      final first = _firstIncomplete(journey, myMember, localExtra);
       setState(() {
         _journey    = journey;
         _myMember   = myMember;
+        _localExtra = localExtra;
         _loading    = false;
         _surah      = first?.$1 ?? journey.endSurah;
         _ayah       = first?.$2 ?? journey.endAyah;
         _showAudio  = journey.dimensions.contains('memorize');
         _showTafsir = journey.dimensions.contains('commentary');
+        _todayCount = AppStorage().getTodayJourneyCount(widget.journeyId);
       });
+      _scheduleAutoHide();
     } catch (e) {
       setState(() { _loading = false; _error = e.toString(); });
     }
   }
 
-  /// Returns the first ayah that has not been completed, or null if all done.
-  (int, int)? _firstIncomplete(Journey j, JourneyMember? member) {
-    if (member == null) return (j.startSurah, j.startAyah);
+  /// Returns the first ayah not yet done (server + local overlay).
+  (int, int)? _firstIncomplete(
+      Journey j, JourneyMember? member, Set<String> localExtra) {
+    if (member == null && localExtra.isEmpty) return (j.startSurah, j.startAyah);
     for (int s = j.startSurah; s <= j.endSurah; s++) {
       final minA = s == j.startSurah ? j.startAyah : 1;
       final maxA = s == j.endSurah   ? j.endAyah   : ayahCounts[s];
       for (int a = minA; a <= maxA; a++) {
-        if (!member.isAyahDone(s, a)) return (s, a);
+        final done = (member?.isAyahDone(s, a) ?? false) ||
+            localExtra.contains('${s}_$a');
+        if (!done) return (s, a);
       }
     }
     return null;
   }
 
-  bool get _isFirstAyah    => _surah == _journey!.startSurah && _ayah == _journey!.startAyah;
-  bool get _isLastAyah     => _surah == _journey!.endSurah   && _ayah == _journey!.endAyah;
+  bool get _isFirstAyah => _surah == _journey!.startSurah && _ayah == _journey!.startAyah;
+  bool get _isLastAyah  => _surah == _journey!.endSurah   && _ayah == _journey!.endAyah;
 
   void _prevAyah() {
     if (_journey == null || _isFirstAyah) return;
@@ -107,6 +189,7 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
         _ayah = _surah == _journey!.endSurah ? _journey!.endAyah : ayahCounts[_surah];
       }
     });
+    _revealControls();
   }
 
   void _nextAyah() {
@@ -120,6 +203,7 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
         _ayah = _surah == _journey!.startSurah ? _journey!.startAyah : 1;
       }
     });
+    _revealControls();
   }
 
   void _triggerGlow() {
@@ -130,63 +214,81 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
   }
 
   Future<void> _markComplete() async {
-    if (_completing || _journey == null || _myMember?.isActionable != true) return;
+    if (_journey == null || _myMember?.isActionable != true) return;
+    final surah = _surah;
+    final ayah  = _ayah;
+
+    // Already done (server or local) — nothing to do.
+    if (_effectiveMember?.isAyahDone(surah, ayah) == true) return;
+
     HapticFeedback.lightImpact();
     _triggerGlow();
-    setState(() => _completing = true);
-    try {
-      final updated = await _repo.updateProgress(
-        id: widget.journeyId,
-        surah: _surah,
-        ayah: _ayah,
-      );
+    UserProgression().recordActivity();
+
+    // ── Optimistic update ────────────────────────────────────────────────────
+    final newTodayCount = AppStorage().incrementTodayJourneyCount(widget.journeyId);
+    setState(() {
+      _localExtra = {..._localExtra, '${surah}_$ayah'};
+      _todayCount = newTodayCount;
+    });
+
+    // Advance focus immediately — reader keeps moving without waiting.
+    if (!_isLastAyah) _nextAyah();
+
+    // Persist to queue so it survives app restarts.
+    ProgressSyncQueue().enqueue(widget.journeyId, surah, ayah);
+
+    // ── Background sync ──────────────────────────────────────────────────────
+    _syncEntry(surah, ayah);
+  }
+
+  void _syncEntry(int surah, int ayah) {
+    _repo
+        .updateProgress(id: widget.journeyId, surah: surah, ayah: ayah)
+        .then((updated) {
       if (!mounted) return;
-      UserProgression().recordActivity();
-      final myUid      = FirebaseAuth.instance.currentUser?.uid ?? '';
-      final wasLast    = _isLastAyah;
+      final myUid         = FirebaseAuth.instance.currentUser?.uid ?? '';
       final updatedMember = updated.memberFor(myUid);
+      // Remove server-confirmed keys from local overlay.
+      final confirmedKeys = updatedMember?.completedAyahs.keys.toSet() ?? {};
+      ProgressSyncQueue().removeEntry(widget.journeyId, surah, ayah);
       setState(() {
-        _journey  = updated;
-        _myMember = updatedMember;
-        _completing = false;
+        _journey    = updated;
+        _myMember   = updatedMember;
+        _localExtra = _localExtra
+            .where((k) => !confirmedKeys.contains(k))
+            .toSet();
       });
       if (updatedMember?.isCompleted == true) {
         UserProgression().setJourneyCompleted();
         _showCompletionDialog();
-      } else if (!wasLast) {
-        _nextAyah();
       }
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _completing = false);
-      if (e.isJourneyCompleted) {
-        UserProgression().setJourneyCompleted();
-        _showCompletionDialog();
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
+    }).catchError((e) {
+      // Entry stays in queue — will be retried next time _loadJourney runs.
+      if (e is ApiException && e.isJourneyCompleted) {
+        if (mounted) {
+          UserProgression().setJourneyCompleted();
+          _showCompletionDialog();
+        }
       }
-    } catch (e) {
-      if (mounted) setState(() => _completing = false);
-    }
+    });
   }
 
   void _showCompletionDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('Journey Complete!'),
-        content: Text(
-          'You have completed "${_journey?.title ?? 'this journey'}". Well done!',
-        ),
+      builder: (_) => AppDialog(
+        title: 'Journey Complete!',
+        body: 'You have completed "${_journey?.title ?? 'this journey'}". Well done!',
         actions: [
-          TextButton(
+          AppDialogAction(
+            label: 'Done',
+            isPrimary: true,
             onPressed: () {
               Navigator.pop(context); // dialog
               Navigator.pop(context); // journey screen → back to caller
             },
-            child: const Text('Done'),
           ),
         ],
       ),
@@ -227,54 +329,273 @@ class _QuranJourneyScreenState extends State<QuranJourneyScreen> {
     }
 
     final j = _journey!;
+    final completedCount = _effectiveMember?.completedCount ?? 0;
+    final totalCount = j.totalAyahs;
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: Text(
-          getSurahName(_surah),
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          if (_viewMode == _ViewMode.pageContext)
-            TextButton(
-              onPressed: () => setState(() => _viewMode = _ViewMode.ayahCentric),
-              child: const Text('Ayah view',
-                  style: TextStyle(color: Colors.white, fontSize: 13)),
+      backgroundColor: AppColors.surface,
+      body: Stack(
+        children: [
+          // ── Main content ──────────────────────────────────────────────────
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: _viewMode == _ViewMode.ayahCentric
+                ? _AyahCentricView(
+                    key: ValueKey('${_surah}_$_ayah'),
+                    journey: j,
+                    myMember: _effectiveMember,
+                    surah: _surah,
+                    ayah: _ayah,
+                    onPrev: _isFirstAyah ? null : _prevAyah,
+                    onNext: _isLastAyah  ? null : _nextAyah,
+                    glowing: _glowing,
+                    showAudio: _showAudio,
+                    showTafsir: _showTafsir,
+                    isCompleting: false,
+                    onToggleAudio: () { setState(() => _showAudio = !_showAudio); _revealControls(); },
+                    onToggleTafsir: () { setState(() => _showTafsir = !_showTafsir); _revealControls(); },
+                    onMarkComplete: _markComplete,
+                    controlsVisible: _controlsVisible,
+                    onTap: _onContentTap,
+                  )
+                : _PageContextView(
+                    key: const ValueKey('page'),
+                    journey: j,
+                    myMember: _effectiveMember,
+                    surah: _surah,
+                    ayah: _ayah,
+                    onSelectAyah: (s, a) => setState(() { _surah = s; _ayah = a; }),
+                    onMarkComplete: _effectiveMember?.isActionable == true ? _markComplete : null,
+                    controlsVisible: _controlsVisible,
+                    onTap: _onContentTap,
+                  ),
+          ),
+
+          // ── Top bar overlay ───────────────────────────────────────────────
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: AnimatedSlide(
+              offset: _controlsVisible ? Offset.zero : const Offset(0, -1),
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              child: AnimatedOpacity(
+                opacity: _controlsVisible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 220),
+                child: _buildTopBar(j, completedCount, totalCount),
+              ),
+            ),
+          ),
+
+          // ── Daily progress pill (focus mode only) ────────────────────────
+          if (!_controlsVisible && !_locked && _journey != null)
+            Positioned(
+              bottom: MediaQuery.of(context).padding.bottom + 20,
+              left: 0, right: 0,
+              child: Center(
+                child: _DailyProgressPill(
+                  today: _todayCount,
+                  goal: _dailyGoal,
+                ),
+              ),
+            ),
+
+          // ── Lock hint (always visible when locked) ────────────────────────
+          if (_locked)
+            Positioned(
+              bottom: MediaQuery.of(context).padding.bottom + 20,
+              left: 0, right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: _toggleLock,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.lock_outline,
+                            size: 13, color: Colors.white70),
+                        SizedBox(width: 7),
+                        Text('Tap to unlock',
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
         ],
       ),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
-        child: _viewMode == _ViewMode.ayahCentric
-            ? _AyahCentricView(
-                key: ValueKey('${_surah}_$_ayah'),
-                journey: j,
-                myMember: _myMember,
-                surah: _surah,
-                ayah: _ayah,
-                onPrev: _isFirstAyah ? null : _prevAyah,
-                onNext: _isLastAyah  ? null : _nextAyah,
-                glowing: _glowing,
-                showAudio: _showAudio,
-                showTafsir: _showTafsir,
-                isCompleting: _completing,
-                pageUnlocked: UserProgression().hasCompletedFirstAyah,
-                onToggleAudio: () => setState(() => _showAudio = !_showAudio),
-                onToggleTafsir: () => setState(() => _showTafsir = !_showTafsir),
-                onSwitchToPage: () => setState(() => _viewMode = _ViewMode.pageContext),
-                onMarkComplete: _markComplete,
-              )
-            : _PageContextView(
-                key: const ValueKey('page'),
-                journey: j,
-                myMember: _myMember,
-                surah: _surah,
-                ayah: _ayah,
-                onSelectAyah: (s, a) => setState(() { _surah = s; _ayah = a; }),
-                onBackToAyah: () => setState(() => _viewMode = _ViewMode.ayahCentric),
+    );
+  }
+
+  // ── Custom top bar (replaces Scaffold AppBar) ───────────────────────────────
+
+  Widget _buildTopBar(Journey j, int completedCount, int totalCount) {
+    return Material(
+      color: AppColors.primary,
+      elevation: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 56,
+              child: Row(
+                children: [
+                  BackButton(
+                    color: Colors.white,
+                    onPressed: () => Navigator.maybePop(context),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          getSurahName(_surah),
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Verse $_ayah  ·  $completedCount of $totalCount done',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w400),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ── Ayah / Page toggle ──────────────────────────
+                  GestureDetector(
+                    onTap: () {
+                      if (_viewMode == _ViewMode.ayahCentric &&
+                          !UserProgression().hasCompletedFirstAyah) return;
+                      setState(() {
+                        _viewMode = _viewMode == _ViewMode.ayahCentric
+                            ? _ViewMode.pageContext
+                            : _ViewMode.ayahCentric;
+                      });
+                      _revealControls();
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _modeSegment('Ayah',
+                              _viewMode == _ViewMode.ayahCentric),
+                          _modeSegment('Page',
+                              _viewMode == _ViewMode.pageContext),
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      _locked ? Icons.lock : Icons.lock_open_outlined,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    onPressed: _toggleLock,
+                    tooltip: _locked ? 'Unlock' : 'Lock screen',
+                  ),
+                ],
               ),
+            ),
+            LinearProgressIndicator(
+              value: totalCount > 0 ? completedCount / totalCount : 0.0,
+              minHeight: 2,
+              backgroundColor: Colors.white12,
+              valueColor: const AlwaysStoppedAnimation(AppColors.gold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _modeSegment(String label, bool active) => AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: active ? AppColors.primary : Colors.white70,
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Daily progress pill — shown in focus mode (controls hidden, not locked)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DailyProgressPill extends StatelessWidget {
+  final int today;
+  final int goal;
+
+  const _DailyProgressPill({required this.today, required this.goal});
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = goal > 0 ? (today / goal).clamp(0.0, 1.0) : 0.0;
+    final done = today >= goal;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black45,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              value: fraction,
+              strokeWidth: 2.5,
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation(
+                done ? AppColors.gold : Colors.white70,
+              ),
+            ),
+          ),
+          const SizedBox(width: 9),
+          Text(
+            done ? 'Daily goal reached · $today ayahs' : '$today of $goal today',
+            style: TextStyle(
+              color: done ? AppColors.gold : Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -295,11 +616,11 @@ class _AyahCentricView extends StatelessWidget {
   final bool showAudio;
   final bool showTafsir;
   final bool isCompleting;
-  final bool pageUnlocked;
   final VoidCallback onToggleAudio;
   final VoidCallback onToggleTafsir;
-  final VoidCallback onSwitchToPage;
   final VoidCallback? onMarkComplete;
+  final bool controlsVisible;
+  final VoidCallback? onTap;
 
   const _AyahCentricView({
     super.key,
@@ -313,11 +634,11 @@ class _AyahCentricView extends StatelessWidget {
     required this.showAudio,
     required this.showTafsir,
     required this.isCompleting,
-    required this.pageUnlocked,
     required this.onToggleAudio,
     required this.onToggleTafsir,
-    required this.onSwitchToPage,
     this.onMarkComplete,
+    required this.controlsVisible,
+    this.onTap,
   });
 
   bool get _isDone       => myMember?.isAyahDone(surah, ayah) ?? false;
@@ -329,124 +650,138 @@ class _AyahCentricView extends StatelessWidget {
   Widget build(BuildContext context) {
     final dims = journey.dimensions;
 
-    return Column(
+    return Stack(
       children: [
-        // ── Slim progress bar ──────────────────────────────────────────────
-        _ProgressHeader(completed: _completed, total: _total),
-
-        // ── Main scrollable content ────────────────────────────────────────
-        Expanded(
+        // ── Scrollable content — fills entire screen ───────────────────────
+        Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onTap: onTap,
             onHorizontalDragEnd: (details) {
               final v = details.primaryVelocity ?? 0;
               if (v < -300) onNext?.call();
               if (v >  300) onPrev?.call();
             },
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSizes.pagePadding, 16,
-                AppSizes.pagePadding, 24,
-              ),
+              // top: approx safe-area + app-bar (100) + padding (28)
+              // bottom: approx bottom-bar height (220)
+              padding: const EdgeInsets.fromLTRB(24, 128, 24, 220),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── Ayah card ──────────────────────────────────────────
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.cardSurface,
-                      borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-                      border: Border.all(
-                        color: glowing ? AppColors.gold : AppColors.border,
-                        width: glowing ? 2.0 : 1.0,
+                  // ── Verse identifier row ───────────────────────────────
+                  Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _isDone
+                                ? AppColors.gold.withValues(alpha: 0.5)
+                                : AppColors.border,
+                          ),
+                          color: _isDone
+                              ? AppColors.gold.withValues(alpha: 0.08)
+                              : Colors.transparent,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$ayah',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _isDone
+                                  ? AppColors.gold
+                                  : AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
                       ),
-                      boxShadow: glowing
-                          ? [BoxShadow(
-                              color: AppColors.gold.withValues(alpha: 0.25),
-                              blurRadius: 12,
-                              spreadRadius: 2,
-                            )]
-                          : null,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Surah name + ayah number + done badge
-                        Row(
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    getSurahName(surah),
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.textPrimary,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Ayah $ayah',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
+                            Text(
+                              getSurahName(surah),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
                               ),
                             ),
-                            if (_isDone) const _DoneBadge(),
+                            Text(
+                              'Verse $ayah',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary),
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 20),
-
-                        // Arabic text
-                        if (dims.contains('read'))
-                          SizedBox(
-                            width: double.infinity,
-                            child: Text(
-                              getVerse(surah, ayah),
-                              textAlign: TextAlign.right,
-                              style: GoogleFonts.lateef(
-                                textStyle: const TextStyle(
-                                  fontSize: 32,
-                                  color: AppColors.textPrimary,
-                                  height: 2.0,
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        // Divider between Arabic and translation
-                        if (dims.contains('read') && dims.contains('translate'))
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Divider(color: AppColors.border, height: 1),
-                          ),
-
-                        // Translation
-                        if (dims.contains('translate'))
-                          Text(
-                            getVerseTranslation(surah, ayah,
-                                translation: Translation.enSaheeh),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              height: 1.7,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                      ],
-                    ),
+                      ),
+                      if (_isDone) const _DoneBadge(),
+                    ],
                   ),
+
+                  // ── Arabic text ────────────────────────────────────────
+                  if (dims.contains('read')) ...[
+                    const SizedBox(height: 28),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 350),
+                      decoration: glowing
+                          ? BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.gold.withValues(alpha: 0.18),
+                                  blurRadius: 28,
+                                  spreadRadius: 0,
+                                ),
+                              ],
+                            )
+                          : null,
+                      child: Text(
+                        getVerse(surah, ayah),
+                        textAlign: TextAlign.right,
+                        style: GoogleFonts.lateef(
+                          textStyle: TextStyle(
+                            fontSize: 38,
+                            color: glowing
+                                ? AppColors.gold
+                                : _isDone
+                                    ? AppColors.gold.withValues(alpha: 0.72)
+                                    : AppColors.textPrimary,
+                            height: 2.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // ── Translation ────────────────────────────────────────
+                  if (dims.contains('read') && dims.contains('translate')) ...[
+                    const SizedBox(height: 28),
+                    const Divider(color: AppColors.border, height: 1),
+                    const SizedBox(height: 24),
+                  ] else if (dims.contains('translate'))
+                    const SizedBox(height: 28),
+
+                  if (dims.contains('translate'))
+                    Text(
+                      getVerseTranslation(surah, ayah,
+                          translation: Translation.enSaheeh),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.85,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
 
                   // ── Inline audio ─────────────────────────────────────────
                   if (showAudio) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 20),
                     _JourneyAudioPlayer(
                       key: ValueKey('audio_${surah}_$ayah'),
                       surah: surah,
@@ -456,18 +791,18 @@ class _AyahCentricView extends StatelessWidget {
 
                   // ── Inline tafsir ─────────────────────────────────────────
                   if (showTafsir) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.cardSurface,
-                        borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-                        border: const Border.fromBorderSide(
-                            BorderSide(color: AppColors.border)),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'COMMENTARY',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary,
+                        letterSpacing: 1.2,
                       ),
-                      child: CommentarySection(
-                          surahNumber: surah, ayahNumber: ayah),
                     ),
+                    const SizedBox(height: 10),
+                    CommentarySection(surahNumber: surah, ayahNumber: ayah),
                   ],
                 ],
               ),
@@ -475,129 +810,181 @@ class _AyahCentricView extends StatelessWidget {
           ),
         ),
 
-        // ── Bottom controls ────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.fromLTRB(
-            AppSizes.pagePadding, 8,
-            AppSizes.pagePadding, 16,
-          ),
-          decoration: const BoxDecoration(
-            color: AppColors.surface,
-            border: Border(top: BorderSide(color: AppColors.border)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Prev / Next
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    onPressed: onPrev,
-                    icon: Icon(
-                      Icons.chevron_left,
-                      color: onPrev != null
-                          ? AppColors.textSecondary
-                          : AppColors.border,
-                      size: 28,
-                    ),
+        // ── Bottom bar — animated overlay ──────────────────────────────────
+        Positioned(
+          left: 0, right: 0, bottom: 0,
+          child: AnimatedSlide(
+            offset:
+                controlsVisible ? Offset.zero : const Offset(0, 1),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: AnimatedOpacity(
+              opacity: controlsVisible ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 220),
+              child: IgnorePointer(
+                ignoring: !controlsVisible,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: AppColors.cardSurface,
+                    border: Border(
+                        top: BorderSide(
+                            color: AppColors.border, width: 0.5)),
                   ),
-                  IconButton(
-                    onPressed: onNext,
-                    icon: Icon(
-                      Icons.chevron_right,
-                      color: onNext != null
-                          ? AppColors.textSecondary
-                          : AppColors.border,
-                      size: 28,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-
-              // Mark Complete button
-              if (_isActionable && !_isDone)
-                SizedBox(
-                  width: double.infinity,
-                  height: AppSizes.buttonHeight,
-                  child: ElevatedButton(
-                    onPressed: isCompleting ? null : onMarkComplete,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          AppColors.primary.withValues(alpha: 0.6),
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppSizes.buttonRadius),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: isCompleting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Text(
-                            'Mark Complete',
-                            style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w600),
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Tool chips
+                          Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.center,
+                            children: [
+                              _ToolChip(
+                                icon: Icons.volume_up_outlined,
+                                label: 'Audio',
+                                active: showAudio,
+                                onTap: onToggleAudio,
+                              ),
+                              const SizedBox(width: 8),
+                              _ToolChip(
+                                icon: Icons.menu_book_outlined,
+                                label: 'Tafsir',
+                                active: showTafsir,
+                                onTap: onToggleTafsir,
+                              ),
+                            ],
                           ),
-                  ),
-                ),
 
-              // Already done nudge
-              if (_isActionable && _isDone)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.check_circle,
-                          size: 16, color: AppColors.gold),
-                      const SizedBox(width: 6),
-                      Text(
-                        onNext != null ? 'Done — swipe or tap › to continue' : 'All done',
-                        style: const TextStyle(
-                            fontSize: 13, color: AppColors.textSecondary),
+                          const SizedBox(height: 14),
+
+                          // Primary action
+                          if (_isActionable)
+                            _isDone
+                                ? Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                          Icons.check_circle_rounded,
+                                          size: 17,
+                                          color: AppColors.gold),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        onNext != null
+                                            ? 'Done · swipe or tap › for next'
+                                            : 'All done',
+                                        style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight:
+                                                FontWeight.w500,
+                                            color: AppColors
+                                                .textSecondary),
+                                      ),
+                                    ],
+                                  )
+                                : SizedBox(
+                                    width: double.infinity,
+                                    height: 52,
+                                    child: FilledButton(
+                                      onPressed: isCompleting
+                                          ? null
+                                          : onMarkComplete,
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor:
+                                            AppColors.primary,
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor:
+                                            AppColors.primary
+                                                .withValues(alpha: 0.5),
+                                        shape: const StadiumBorder(),
+                                        elevation: 0,
+                                      ),
+                                      child: isCompleting
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child:
+                                                  CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color:
+                                                          Colors.white),
+                                            )
+                                          : const Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .center,
+                                              children: [
+                                                Icon(
+                                                    Icons.check_rounded,
+                                                    size: 18),
+                                                SizedBox(width: 8),
+                                                Text(
+                                                  'Mark Complete',
+                                                  style: TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight
+                                                              .w600),
+                                                ),
+                                              ],
+                                            ),
+                                    ),
+                                  ),
+
+                          const SizedBox(height: 8),
+
+                          // Navigation row
+                          Row(
+                            children: [
+                              IconButton(
+                                onPressed: onPrev,
+                                icon: Icon(
+                                  Icons.arrow_back_ios_new_rounded,
+                                  size: 16,
+                                  color: onPrev != null
+                                      ? AppColors.textSecondary
+                                      : AppColors.border,
+                                ),
+                                style: IconButton.styleFrom(
+                                    minimumSize:
+                                        const Size(40, 36)),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  '$_completed of $_total verses',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: onNext,
+                                icon: Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  size: 16,
+                                  color: onNext != null
+                                      ? AppColors.textSecondary
+                                      : AppColors.border,
+                                ),
+                                style: IconButton.styleFrom(
+                                    minimumSize:
+                                        const Size(40, 36)),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-
-              const SizedBox(height: 12),
-
-              // Secondary actions row
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _SecondaryAction(
-                    icon: Icons.volume_up_outlined,
-                    label: 'Audio',
-                    active: showAudio,
-                    onTap: onToggleAudio,
-                  ),
-                  const SizedBox(width: 32),
-                  _SecondaryAction(
-                    icon: Icons.menu_book_outlined,
-                    label: 'Tafsir',
-                    active: showTafsir,
-                    onTap: onToggleTafsir,
-                  ),
-                  const SizedBox(width: 32),
-                  _SecondaryAction(
-                    icon: Icons.grid_view_outlined,
-                    label: 'Page',
-                    active: false,
-                    locked: !pageUnlocked,
-                    onTap: pageUnlocked ? onSwitchToPage : null,
-                  ),
-                ],
               ),
-            ],
+            ),
           ),
         ),
       ],
@@ -606,57 +993,17 @@ class _AyahCentricView extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Slim progress header
+// Tool chip (Audio / Tafsir / Page view toggle)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ProgressHeader extends StatelessWidget {
-  final int completed;
-  final int total;
-  const _ProgressHeader({required this.completed, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final fraction = total > 0 ? completed / total : 0.0;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppSizes.pagePadding, 12, AppSizes.pagePadding, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: AnimatedProgressBar(
-              value: fraction,
-              minHeight: 4,
-              backgroundColor: AppColors.border,
-              color: AppColors.primaryMuted,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            '$completed/$total',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Secondary action button (Audio / Tafsir / Page)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SecondaryAction extends StatelessWidget {
+class _ToolChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool active;
   final bool locked;
   final VoidCallback? onTap;
 
-  const _SecondaryAction({
+  const _ToolChip({
     required this.icon,
     required this.label,
     required this.active,
@@ -669,37 +1016,47 @@ class _SecondaryAction extends StatelessWidget {
     final color = locked
         ? AppColors.border
         : active
-            ? AppColors.primaryMuted
+            ? AppColors.primary
             : AppColors.textSecondary;
     return Tooltip(
       message: locked ? 'Complete your first ayah to unlock' : '',
       child: GestureDetector(
         onTap: locked ? null : onTap,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(icon, size: 22, color: color),
-                if (locked)
-                  Positioned(
-                    top: -2,
-                    right: -4,
-                    child: Icon(Icons.lock_outline, size: 10, color: AppColors.border),
-                  ),
-              ],
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          decoration: BoxDecoration(
+            color: active
+                ? AppColors.primary.withValues(alpha: 0.1)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: locked
+                  ? AppColors.border
+                  : active
+                      ? AppColors.primary.withValues(alpha: 0.35)
+                      : AppColors.border,
             ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                locked ? Icons.lock_outline : icon,
+                size: 14,
                 color: color,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -716,7 +1073,9 @@ class _PageContextView extends StatefulWidget {
   final int surah;
   final int ayah;
   final void Function(int surah, int ayah) onSelectAyah;
-  final VoidCallback onBackToAyah;
+  final Future<void> Function()? onMarkComplete;
+  final bool controlsVisible;
+  final VoidCallback onTap;
 
   const _PageContextView({
     super.key,
@@ -725,7 +1084,9 @@ class _PageContextView extends StatefulWidget {
     required this.surah,
     required this.ayah,
     required this.onSelectAyah,
-    required this.onBackToAyah,
+    this.onMarkComplete,
+    required this.controlsVisible,
+    required this.onTap,
   });
 
   @override
@@ -736,6 +1097,17 @@ class _PageContextViewState extends State<_PageContextView> {
   late int _page;
   late final int _firstPage;
   late final int _lastPage;
+  bool _completing = false;
+
+  Future<void> _doMarkComplete() async {
+    if (_completing || widget.onMarkComplete == null) return;
+    setState(() => _completing = true);
+    try {
+      await widget.onMarkComplete!();
+    } finally {
+      if (mounted) setState(() => _completing = false);
+    }
+  }
 
   @override
   void initState() {
@@ -793,58 +1165,176 @@ class _PageContextViewState extends State<_PageContextView> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: [
-        Expanded(
+        // ── Full-screen page viewer ─────────────────────────────────────────
+        // onBackgroundClick fires when the tap lands outside any ayah text
+        // span — the inner TapAndPanGestureRecognizer wins for ayah taps,
+        // so this only triggers on truly empty regions.
+        Positioned.fill(
           child: ArabicPageViewer(
             page: _page,
             surah: widget.surah,
             ayah: widget.ayah,
             ayahColor: _ayahColor,
             onAyahClicked: _onAyahTapped,
+            onBackgroundClick: widget.onTap,
           ),
         ),
-        // ── Page navigation bar ────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: const BoxDecoration(
-            color: AppColors.cardSurface,
-            border: Border(top: BorderSide(color: AppColors.border)),
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                color: AppColors.primary,
-                disabledColor: AppColors.border,
-                onPressed:
-                    _page > _firstPage ? () => setState(() => _page--) : null,
-              ),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Page $_page',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14),
+
+        // ── Bottom bar — animated overlay ───────────────────────────────────
+        Positioned(
+          left: 0, right: 0, bottom: 0,
+          child: AnimatedSlide(
+            offset: widget.controlsVisible
+                ? Offset.zero
+                : const Offset(0, 1),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: AnimatedOpacity(
+              opacity: widget.controlsVisible ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 220),
+              child: IgnorePointer(
+                ignoring: !widget.controlsVisible,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: AppColors.cardSurface,
+                    border: Border(
+                        top: BorderSide(
+                            color: AppColors.border, width: 0.5)),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ── Page navigation ──────────────────────
+                          Row(
+                            children: [
+                              IconButton(
+                                icon: const Icon(
+                                    Icons.chevron_left, size: 26),
+                                color: _page > _firstPage
+                                    ? AppColors.primary
+                                    : AppColors.border,
+                                onPressed: _page > _firstPage
+                                    ? () => setState(() => _page--)
+                                    : null,
+                                style: IconButton.styleFrom(
+                                    minimumSize: const Size(40, 36)),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      'Page $_page',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 1),
+                                    Text(
+                                      '${getSurahName(widget.surah)}  ·  Verse ${widget.ayah}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color:
+                                              AppColors.textSecondary),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                    Icons.chevron_right, size: 26),
+                                color: _page < _lastPage
+                                    ? AppColors.primary
+                                    : AppColors.border,
+                                onPressed: _page < _lastPage
+                                    ? () => setState(() => _page++)
+                                    : null,
+                                style: IconButton.styleFrom(
+                                    minimumSize: const Size(40, 36)),
+                              ),
+                            ],
+                          ),
+
+                          // ── Mark complete ────────────────────────
+                          if (widget.onMarkComplete != null) ...[
+                            const SizedBox(height: 8),
+                            Builder(builder: (context) {
+                              final isDone = widget.myMember
+                                      ?.isAyahDone(
+                                          widget.surah, widget.ayah) ??
+                                  false;
+                              return SizedBox(
+                                width: double.infinity,
+                                height: AppSizes.buttonHeight,
+                                child: isDone
+                                    ? OutlinedButton.icon(
+                                        onPressed: null,
+                                        style: OutlinedButton.styleFrom(
+                                          disabledForegroundColor:
+                                              AppColors.primaryMuted,
+                                          side: const BorderSide(
+                                              color:
+                                                  AppColors.primaryMuted),
+                                          shape: const StadiumBorder(),
+                                        ),
+                                        icon: const Icon(
+                                            Icons.check_circle_outline,
+                                            size: 18),
+                                        label: const Text('Completed',
+                                            style: TextStyle(
+                                                fontWeight:
+                                                    FontWeight.w600)),
+                                      )
+                                    : FilledButton.icon(
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor:
+                                              AppColors.primary,
+                                          foregroundColor: Colors.white,
+                                          shape: const StadiumBorder(),
+                                          elevation: 0,
+                                        ),
+                                        onPressed: _completing
+                                            ? null
+                                            : _doMarkComplete,
+                                        icon: _completing
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color:
+                                                            Colors.white),
+                                              )
+                                            : const Icon(
+                                                Icons.check_rounded,
+                                                size: 18),
+                                        label: const Text('Mark Complete',
+                                            style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight:
+                                                    FontWeight.w600)),
+                                      ),
+                              );
+                            }),
+                          ],
+                        ],
+                      ),
                     ),
-                    Text(
-                      'Tap an ayah for details',
-                      style: const TextStyle(
-                          fontSize: 10, color: AppColors.textSecondary),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                color: AppColors.primary,
-                disabledColor: AppColors.border,
-                onPressed:
-                    _page < _lastPage ? () => setState(() => _page++) : null,
-              ),
-            ],
+            ),
           ),
         ),
       ],
@@ -1360,21 +1850,20 @@ class _DoneBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: AppColors.gold.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.gold.withValues(alpha: 0.5)),
+          color: AppColors.gold.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check_circle, size: 13, color: AppColors.gold),
+            Icon(Icons.check_rounded, size: 12, color: AppColors.gold),
             const SizedBox(width: 4),
             Text(
               'Done',
               style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
                   color: AppColors.gold,
                   fontWeight: FontWeight.w600),
             ),

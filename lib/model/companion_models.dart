@@ -17,7 +17,7 @@ class CompanionRequest {
     required this.toUsername,
   });
 
-  factory CompanionRequest.fromJson(Map<String, dynamic> json) =>
+  factory CompanionRequest.fromJson(Map<dynamic, dynamic> json) =>
       CompanionRequest(
         id: json['id'] as String,
         fromUserId: json['fromUserId'] as String,
@@ -26,8 +26,16 @@ class CompanionRequest {
         toUsername: json['toUsername'] as String,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'fromUserId': fromUserId,
+        'fromUsername': fromUsername,
+        'toUserId': toUserId,
+        'toUsername': toUsername,
+      };
+
   static List<CompanionRequest> parseList(List<dynamic> data) =>
-      data.map((e) => CompanionRequest.fromJson(e as Map<String, dynamic>)).toList();
+      data.map((e) => CompanionRequest.fromJson(e as Map)).toList();
 }
 
 // ── User stats ────────────────────────────────────────────────────────────────

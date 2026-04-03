@@ -6,6 +6,7 @@ import 'package:tahfeex/model/journey_model.dart';
 import 'package:tahfeex/resources/resources.dart';
 import 'package:tahfeex/screens/journey_detail_screen.dart';
 import 'package:tahfeex/service/states/states.dart';
+import 'package:tahfeex/widgets/app_dialog.dart';
 import 'package:tahfeex/widgets/app_route.dart';
 
 class UserProfileScreen extends StatelessWidget {
@@ -230,18 +231,17 @@ class _UserProfileView extends StatelessWidget {
     if (value == 'block') {
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Block this user?'),
-          content: const Text(
-              'They will be removed as a companion and cannot send you requests.'),
+        builder: (_) => AppDialog(
+          title: 'Block this user?',
+          body: 'They will be removed as a companion and cannot send you requests.',
           actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
-            TextButton(
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            AppDialogAction(
+                label: 'Cancel',
+                onPressed: () => Navigator.pop(context, false)),
+            AppDialogAction(
+              label: 'Block',
+              isDestructive: true,
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Block'),
             ),
           ],
         ),
@@ -372,17 +372,17 @@ class _RelationshipButton extends StatelessWidget {
   Future<void> _confirmRemove(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Remove companion?'),
-        content: const Text('You will no longer see each other\'s journeys.'),
+      builder: (_) => AppDialog(
+        title: 'Remove companion?',
+        body: 'You will no longer see each other\'s journeys.',
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+          AppDialogAction(
+              label: 'Cancel',
+              onPressed: () => Navigator.pop(context, false)),
+          AppDialogAction(
+            label: 'Remove',
+            isDestructive: true,
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
           ),
         ],
       ),

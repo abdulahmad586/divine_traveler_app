@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quran/quran.dart';
+import 'package:tahfeex/widgets/app_dialog.dart';
 import 'package:tahfeex/model/models.dart';
 import 'package:tahfeex/resources/resources.dart';
 import 'package:tahfeex/service/repositories/journey_repository.dart';
@@ -116,16 +117,15 @@ class _CreateJourneyScreenState extends State<CreateJourneyScreen> {
         if (mounted) {
           await showDialog(
             context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Journey limit reached'),
-              content: const Text(
-                "You've reached the maximum of 5 active journeys. "
-                'Complete or abandon one before starting a new one.',
-              ),
+            builder: (_) => AppDialog(
+              title: 'Journey limit reached',
+              body: "You've reached the maximum of 5 active journeys. "
+                  'Complete or abandon one before starting a new one.',
               actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('OK')),
+                AppDialogAction(
+                    label: 'OK',
+                    isPrimary: true,
+                    onPressed: () => Navigator.pop(context)),
               ],
             ),
           );

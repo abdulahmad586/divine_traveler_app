@@ -28,6 +28,7 @@ class AlarmService {
 
   static const _alarmChannelId = 'tahfeex_alarm';
   static const _reminderChannelId = 'tahfeex_reminder';
+  static const _nudgeChannelId = 'tahfeex_nudge';
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,41 @@ class AlarmService {
           playSound: true,
         ),
       );
+      await android.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _nudgeChannelId,
+          'Companion Nudges',
+          description: 'Encouragements from your companions',
+          importance: Importance.high,
+          playSound: true,
+        ),
+      );
     }
+  }
+
+  // ── Nudge (foreground FCM) ────────────────────────────────────────────────
+
+  static Future<void> showNudge({
+    required String title,
+    required String body,
+  }) async {
+    await _plugin.show(
+      DateTime.now().millisecondsSinceEpoch & 0x7FFFFFFF,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _nudgeChannelId,
+          'Companion Nudges',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+        ),
+      ),
+    );
   }
 
   // ── Permissions ───────────────────────────────────────────────────────────

@@ -32,4 +32,8 @@ class UserRepository {
       data: {'fcmToken': fcmToken},
     );
   }
+
+  Future<void> deleteAccount() async {
+    await _client.delete(ApiConstants.me);
+  }
 }

@@ -20,6 +20,7 @@ import 'package:tahfeex/service/states/states.dart';
 import 'package:tahfeex/shared/connections/connections.dart';
 import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/progression/user_progression.dart';
+import 'package:tahfeex/shared/sync/progress_sync_queue.dart';
 import 'package:tahfeex/widgets/animated_progress_bar.dart';
 import 'package:tahfeex/widgets/app_route.dart';
 
@@ -60,8 +61,23 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  bool _minSplashDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(const Duration(milliseconds: 2200), () {
+      if (mounted) setState(() => _minSplashDone = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +136,8 @@ class MyApp extends StatelessWidget {
         home: StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            if (!_minSplashDone ||
+                snapshot.connectionState == ConnectionState.waiting) {
               return const _SplashScreen();
             }
 
@@ -142,15 +159,151 @@ class MyApp extends StatelessWidget {
 // Splash screen
 // ──────────────────────────────────────────────────────────────────────────────
 
-class _SplashScreen extends StatelessWidget {
+class _SplashScreen extends StatefulWidget {
   const _SplashScreen();
 
   @override
+  State<_SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<_SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+  late final Animation<double> _tagFade;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+
+    _fade = CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+    );
+    _scale = Tween<double>(begin: 0.80, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _ctrl,
+        curve: const Interval(0.0, 0.7, curve: Curves.easeOutCubic),
+      ),
+    );
+    _tagFade = CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
+    );
+
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: AppColors.surface,
-      body: Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0.05, -0.45),
+            radius: 1.35,
+            colors: [Color(0xFF3E6B1C), AppColors.primary],
+            stops: [0.0, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const Spacer(flex: 3),
+              FadeTransition(
+                opacity: _fade,
+                child: ScaleTransition(
+                  scale: _scale,
+                  child: Column(
+                    children: [
+                      // Emblem
+                      Container(
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppColors.gold.withValues(alpha: 0.55),
+                            width: 1.0,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white.withValues(alpha: 0.10),
+                              border: Border.all(
+                                color: AppColors.gold.withValues(alpha: 0.25),
+                                width: 0.5,
+                              ),
+                            ),
+                            child: ClipOval(
+                              child: Image.asset(
+                                'assets/logo.png',
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Icon(
+                                  Icons.menu_book_rounded,
+                                  size: 42,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      // App name
+                      const Text(
+                        'Divine Traveler',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      // Gold rule
+                      Container(
+                        width: 48,
+                        height: 2,
+                        decoration: BoxDecoration(
+                          color: AppColors.gold,
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(flex: 2),
+              FadeTransition(
+                opacity: _tagFade,
+                child: const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white38,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 48),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -167,12 +320,28 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  final _syncRepo = JourneyRepository();
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _setupFcm();
     _handleInitialMessage();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ProgressSyncQueue().flush(_syncRepo).ignore();
+    }
   }
 
   // ── FCM setup ───────────────────────────────────────────────────────────
@@ -193,6 +362,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // App in foreground and user taps the notification.
     FirebaseMessaging.onMessageOpenedApp.listen(_routeMessage);
+
+    // App in foreground — FCM suppresses the system notification, so we
+    // display it ourselves via a local notification.
+    FirebaseMessaging.onMessage.listen((message) {
+      final notif = message.notification;
+      if (notif != null) {
+        AlarmService.showNudge(
+          title: notif.title ?? '',
+          body: notif.body ?? '',
+        );
+      }
+    });
   }
 
   Future<void> _registerFcmToken() async {
@@ -482,7 +663,7 @@ class _HomeHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Assalamu Alaikum',
+                'Assalamu Alaikum 👋',
                 style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
               ),
               if (firstName != null) ...[
@@ -626,7 +807,7 @@ class _CurrentJourneyCard extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Study tools row — three standalone tools accessible from home
+// Study tools card — position indicator + three tools in one minimal card
 // ──────────────────────────────────────────────────────────────────────────────
 
 class _StudyToolsRow extends StatelessWidget {
@@ -634,79 +815,152 @@ class _StudyToolsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        _ToolTile(
-          icon: Icons.menu_book_outlined,
-          label: 'Quran Reader',
-          onTap: () => Navigator.push(
-            context,
-            AppRoute(builder: (_) => const QuranReader()),
-          ),
-        ),
-        const SizedBox(width: 10),
-        _ToolTile(
-          icon: Icons.psychology_outlined,
-          label: 'Memorization',
-          onTap: () => Navigator.push(
-            context,
-            AppRoute(builder: (_) => const MemorizationScreen()),
-          ),
-        ),
-        const SizedBox(width: 10),
-        _ToolTile(
-          icon: Icons.auto_stories_outlined,
-          label: 'Tafsir',
-          onTap: () => Navigator.push(
-            context,
-            AppRoute(builder: (_) => const TafseerScreen()),
-          ),
-        ),
-      ],
-    );
-  }
-}
+    return BlocBuilder<MainCubit, MainState>(
+      builder: (context, state) {
+        final page = state.currentPage ?? 1;
+        final verse = state.currentVerse ?? 1;
+        final data = getPageData(page);
+        final sNum = data.first['surah'] as int;
+        final arabic = getSurahNameArabic(sNum);
+        final english = getSurahName(sNum);
 
-class _ToolTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _ToolTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
+        return Container(
           decoration: BoxDecoration(
-            color: AppColors.cardSurface,
+            color: const Color(0xFFFAF8F2),
             borderRadius: BorderRadius.circular(AppSizes.cardRadius),
-            border: const Border.fromBorderSide(
-                BorderSide(color: AppColors.border)),
+            border: Border.all(color: const Color(0xFFE4D9CA)),
           ),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(icon, size: 24, color: AppColors.primary),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textSecondary,
+              // ── Position header ───────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'LAST READ',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                              color: AppColors.gold,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            arabic,
+                            style: GoogleFonts.lateef(
+                              textStyle: const TextStyle(
+                                fontSize: 24,
+                                height: 1.1,
+                                color: Color(0xFF1C1510),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            '$english  ·  Page $page  ·  Verse $verse',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF8C7B6B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // ── Divider ───────────────────────────────────────────────────
+              const Divider(height: 1, color: Color(0xFFE4D9CA)),
+              // ── Tool rows ─────────────────────────────────────────────────
+              _ToolRow(
+                icon: Icons.menu_book_outlined,
+                label: 'Quran Reader',
+                onTap: () => Navigator.push(
+                  context,
+                  AppRoute(builder: (_) => const QuranReader()),
+                ),
+              ),
+              const Divider(height: 1, indent: 48, color: Color(0xFFE4D9CA)),
+              _ToolRow(
+                icon: Icons.psychology_outlined,
+                label: 'Memorization',
+                onTap: () => Navigator.push(
+                  context,
+                  AppRoute(builder: (_) => const MemorizationScreen()),
+                ),
+              ),
+              const Divider(height: 1, indent: 48, color: Color(0xFFE4D9CA)),
+              _ToolRow(
+                icon: Icons.auto_stories_outlined,
+                label: 'Tafsir',
+                isLast: true,
+                onTap: () => Navigator.push(
+                  context,
+                  AppRoute(builder: (_) => const TafseerScreen()),
                 ),
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+}
+
+class _ToolRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool isLast;
+
+  const _ToolRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isLast = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: isLast
+          ? BorderRadius.only(
+              bottomLeft: Radius.circular(AppSizes.cardRadius),
+              bottomRight: Radius.circular(AppSizes.cardRadius),
+            )
+          : BorderRadius.zero,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: AppColors.primary),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF1C1510),
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 12,
+              color: Color(0xFF8C7B6B),
+            ),
+          ],
         ),
       ),
     );
@@ -785,6 +1039,7 @@ class _DailyAyahCardState extends State<_DailyAyahCard>
 
   late final int _surah;
   late final int _ayah;
+  bool _collapsed = false;
 
   @override
   void initState() {
@@ -854,103 +1109,149 @@ class _DailyAyahCardState extends State<_DailyAyahCard>
             ),
             child: Stack(
               children: [
-                // Content — left padding reserves space for the bar
+                // Content — left padding reserves space for the gold bar
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // "AYAH OF THE DAY" label
-                      Row(
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: const BoxDecoration(
-                              color: AppColors.gold,
-                              shape: BoxShape.circle,
+                      // Header row — always visible
+                      GestureDetector(
+                        onTap: () => setState(() => _collapsed = !_collapsed),
+                        behavior: HitTestBehavior.opaque,
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(
+                                color: AppColors.gold,
+                                shape: BoxShape.circle,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 7),
-                          const Text(
-                            'AYAH OF THE DAY',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textSecondary,
-                              letterSpacing: 1.1,
+                            const SizedBox(width: 7),
+                            const Text(
+                              'AYAH OF THE DAY',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textSecondary,
+                                letterSpacing: 1.1,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      // Arabic text
-                      SizedBox(
-                        width: double.infinity,
-                        child: Text(
-                          arabic,
-                          textAlign: TextAlign.right,
-                          style: GoogleFonts.lateef(
-                            fontSize: 28,
-                            color: AppColors.textPrimary,
-                            height: 1.9,
-                          ),
+                            const Spacer(),
+                            AnimatedRotation(
+                              turns: _collapsed ? -0.25 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              child: const Icon(
+                                Icons.expand_more_rounded,
+                                size: 18,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
 
-                      const SizedBox(height: 12),
-                      const Divider(color: AppColors.border, height: 1),
-                      const SizedBox(height: 12),
+                      // Collapsible body
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeInOut,
+                        child: _collapsed
+                            ? const SizedBox.shrink()
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 14),
 
-                      // Translation (italic, quoted)
-                      Text(
-                        '\u201c$translation\u201d',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          height: 1.65,
-                          color: AppColors.textSecondary,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      // Reference + Read link
-                      Row(
-                        children: [
-                          Text(
-                            '$surahName · $_surah:$_ayah',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.primaryMuted,
-                            ),
-                          ),
-                          const Spacer(),
-                          GestureDetector(
-                            onTap: () => _readThisAyah(context),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Read',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary,
+                                  // Arabic text
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: Text(
+                                      arabic,
+                                      textAlign: TextAlign.right,
+                                      style: GoogleFonts.lateef(
+                                        fontSize: 28,
+                                        color: AppColors.textPrimary,
+                                        height: 1.9,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                SizedBox(width: 3),
-                                Icon(Icons.arrow_forward_rounded,
-                                    size: 13, color: AppColors.primary),
-                              ],
-                            ),
-                          ),
-                        ],
+
+                                  const SizedBox(height: 12),
+                                  const Divider(
+                                      color: AppColors.border, height: 1),
+                                  const SizedBox(height: 12),
+
+                                  // Translation
+                                  Text(
+                                    '\u201c$translation\u201d',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.65,
+                                      color: AppColors.textSecondary,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+
+                                  const SizedBox(height: 14),
+
+                                  // Reference + Read link
+                                  Row(
+                                    children: [
+                                      Text(
+                                        '$surahName · $_surah:$_ayah',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.primaryMuted,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      GestureDetector(
+                                        onTap: () => _readThisAyah(context),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              'Read',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.primary,
+                                              ),
+                                            ),
+                                            SizedBox(width: 3),
+                                            Icon(Icons.arrow_forward_rounded,
+                                                size: 13,
+                                                color: AppColors.primary),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                       ),
                     ],
+                  ),
+                ),
+
+                // Animated gold left bar
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 4,
+                  child: AnimatedBuilder(
+                    animation: _bar,
+                    builder: (_, __) => ClipRect(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        heightFactor: _bar.value,
+                        child: Container(color: AppColors.gold),
+                      ),
+                    ),
                   ),
                 ),
               ],

@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:tahfeex/model/app_user_model.dart';
 import 'package:tahfeex/model/companion_models.dart';
+import 'package:tahfeex/service/app_storage.dart';
 import 'package:tahfeex/service/repositories/companion_repository.dart';
 
 // ── Cubit ─────────────────────────────────────────────────────────────────────
@@ -14,19 +15,39 @@ class CompanionsCubit extends Cubit<CompanionsState> {
 
   /// Loads companions list and incoming requests in parallel.
   Future<void> load() async {
-    emit(state.copyWith(isLoading: true, clearError: true, clearActing: true));
+    // Serve cached data immediately.
+    final cachedCompanions = AppStorage().getCompanionsCache();
+    final cachedRequests   = AppStorage().getIncomingRequestsCache();
+    if (cachedCompanions != null || cachedRequests != null) {
+      emit(state.copyWith(
+        isLoading: true,
+        clearError: true,
+        clearActing: true,
+        companions:       cachedCompanions?.map(AppUser.fromJson).toList(),
+        incomingRequests: cachedRequests?.map(CompanionRequest.fromJson).toList(),
+      ));
+    } else {
+      emit(state.copyWith(isLoading: true, clearError: true, clearActing: true));
+    }
     try {
       final results = await Future.wait([
         _repo.getCompanions(),
         _repo.getIncomingRequests(),
       ]);
+      final companions = results[0] as List<AppUser>;
+      final requests   = results[1] as List<CompanionRequest>;
+      AppStorage().setCompanionsCache(companions.map((u) => u.toJson()).toList());
+      AppStorage().setIncomingRequestsCache(requests.map((r) => r.toJson()).toList());
       emit(state.copyWith(
         isLoading: false,
-        companions: results[0] as List<AppUser>,
-        incomingRequests: results[1] as List<CompanionRequest>,
+        companions: companions,
+        incomingRequests: requests,
       ));
     } catch (e) {
-      emit(state.copyWith(isLoading: false, error: e.toString()));
+      emit(state.copyWith(
+        isLoading: false,
+        error: (cachedCompanions == null && cachedRequests == null) ? e.toString() : null,
+      ));
     }
   }
 
@@ -50,6 +71,9 @@ class CompanionsCubit extends Cubit<CompanionsState> {
     final updated = state.incomingRequests
         ?.where((r) => r.id != requestId)
         .toList();
+    if (updated != null) {
+      AppStorage().setIncomingRequestsCache(updated.map((r) => r.toJson()).toList());
+    }
     emit(state.copyWith(incomingRequests: updated, clearActing: true));
     await load();
   }

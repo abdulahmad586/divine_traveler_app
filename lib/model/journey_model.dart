@@ -69,19 +69,51 @@ class JourneyMember {
   bool isAyahDone(int surah, int ayah) =>
       completedAyahs['${surah}_$ayah'] == true;
 
-  static JourneyMember fromMap(Map<String, dynamic> map) {
+  /// Returns a copy of this member with [extra] keys (`'surah_ayah'` format)
+  /// overlaid as completed. Used for optimistic local progress display.
+  JourneyMember withExtraCompletions(Set<String> extra) {
+    if (extra.isEmpty) return this;
+    return JourneyMember(
+      userId:         userId,
+      name:           name,
+      username:       username,
+      status:         status,
+      completedAyahs: {...completedAyahs, for (final k in extra) k: true},
+      completedCount: completedCount + extra.length,
+      joinedAt:       joinedAt,
+      updatedAt:      updatedAt,
+    );
+  }
+
+  static JourneyMember fromMap(Map<dynamic, dynamic> map) {
+    final completedRaw = map['completedAyahs'];
+    final completedAyahs = completedRaw is Map
+        ? Map<String, bool>.fromEntries(
+            completedRaw.entries.map((e) => MapEntry(e.key as String, e.value as bool)),
+          )
+        : <String, bool>{};
     return JourneyMember(
       userId:         map['userId'] as String,
       name:           map['name'] as String? ?? '',
       username:       map['username'] as String? ?? '',
       status:         map['status'] as String? ?? 'active',
-      completedAyahs: (map['completedAyahs'] as Map<String, dynamic>? ?? {})
-          .map((k, v) => MapEntry(k, v as bool)),
+      completedAyahs: completedAyahs,
       completedCount: map['completedCount'] as int? ?? 0,
       joinedAt:       _parseTs(map['joinedAt']),
       updatedAt:      _parseTs(map['updatedAt']),
     );
   }
+
+  Map<String, dynamic> toMap() => {
+    'userId':         userId,
+    'name':           name,
+    'username':       username,
+    'status':         status,
+    'completedAyahs': completedAyahs,
+    'completedCount': completedCount,
+    'joinedAt':       joinedAt.toIso8601String(),
+    'updatedAt':      updatedAt.toIso8601String(),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,7 +211,7 @@ class Journey {
 
   // ── Parsing ───────────────────────────────────────────────────────────────
 
-  static Journey fromMap(Map<String, dynamic> map) {
+  static Journey fromMap(Map<dynamic, dynamic> map) {
     return Journey(
       id:           map['id'] as String,
       creatorId:    map['creatorId'] as String,
@@ -196,8 +228,8 @@ class Journey {
       allowJoining: map['allowJoining'] as bool? ?? false,
       memberIds:    List<String>.from(map['memberIds'] as List? ?? []),
       memberCount:  map['memberCount'] as int? ?? 0,
-      members:      (map['members'] as List<dynamic>? ?? [])
-          .map((e) => JourneyMember.fromMap(e as Map<String, dynamic>))
+      members:      (map['members'] as List? ?? [])
+          .map((e) => JourneyMember.fromMap(e as Map))
           .toList(),
       createdAt:    _parseTs(map['createdAt']),
       updatedAt:    _parseTs(map['updatedAt']),
@@ -205,5 +237,26 @@ class Journey {
   }
 
   static List<Journey> parseList(List<dynamic> list) =>
-      list.map((e) => Journey.fromMap(e as Map<String, dynamic>)).toList();
+      list.map((e) => Journey.fromMap(e as Map)).toList();
+
+  Map<String, dynamic> toMap() => {
+    'id':           id,
+    'creatorId':    creatorId,
+    'title':        title,
+    'dimensions':   dimensions,
+    'startSurah':   startSurah,
+    'startAyah':    startAyah,
+    'endSurah':     endSurah,
+    'endAyah':      endAyah,
+    'startDate':    startDate.toIso8601String(),
+    'endDate':      endDate.toIso8601String(),
+    'status':       status,
+    'totalAyahs':   totalAyahs,
+    'allowJoining': allowJoining,
+    'memberIds':    memberIds,
+    'memberCount':  memberCount,
+    'members':      members.map((m) => m.toMap()).toList(),
+    'createdAt':    createdAt.toIso8601String(),
+    'updatedAt':    updatedAt.toIso8601String(),
+  };
 }

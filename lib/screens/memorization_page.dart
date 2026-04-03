@@ -38,16 +38,55 @@ class _MemorizationScreenState extends State<MemorizationScreen> {
   bool isRepeating = false;
   int totalVersesInSurah = 0;
 
-  String surahLabel = "";
-  bool showPageNumbers = false;
-  bool showControls = true;
+  String surahLabel = '';
   bool settingAyahFrom = false;
   bool settingAyahTo = false;
 
   bool endingSurahPlayback = false;
-  double? controlPosition;
   SurahAudio? surahAudio;
   int surahNumber = 1;
+
+  // ── Focus / lock state ─────────────────────────────────────────────────────
+  bool _controlsVisible = true;
+  bool _locked = false;
+  Timer? _autoHideTimer;
+
+  void _scheduleAutoHide() {
+    _autoHideTimer?.cancel();
+    _autoHideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted && !_locked) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _revealControls() {
+    if (_locked) return;
+    if (!_controlsVisible) setState(() => _controlsVisible = true);
+    _scheduleAutoHide();
+  }
+
+  void _onContentTap() {
+    if (_locked) return;
+    if (_controlsVisible) {
+      _autoHideTimer?.cancel();
+      setState(() => _controlsVisible = false);
+    } else {
+      _revealControls();
+    }
+  }
+
+  void _toggleLock() {
+    setState(() {
+      if (_locked) {
+        _locked = false;
+        _controlsVisible = true;
+        _scheduleAutoHide();
+      } else {
+        _locked = true;
+        _autoHideTimer?.cancel();
+        _controlsVisible = false;
+      }
+    });
+  }
 
   late MyAudioPlayer audioPlayer;
 
@@ -58,10 +97,12 @@ class _MemorizationScreenState extends State<MemorizationScreen> {
     page = context.read<MainCubit>().state.currentPage ?? 1;
     setPageLabels(page);
     loadSurahAudio(surahNumber);
+    _scheduleAutoHide();
   }
 
   @override
   void dispose() {
+    _autoHideTimer?.cancel();
     audioPlayer.dispose(); // BUG-01
     super.dispose(); // BUG-01: must be last
   }
@@ -281,387 +322,434 @@ class _MemorizationScreenState extends State<MemorizationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        body: SafeArea(
-      child: Stack(
+      backgroundColor: const Color(0xFFF2EFE8),
+      body: Stack(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            color: Colors.white,
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.arrow_back_ios),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        AlertUtls.showModal(context,
-                            SurahSelector(onSurahSelected: (int surahNumber) {
-                          // BUG-07: was storing a closure in setSurahNumber that
-                          // was never called. Call changeSurah directly instead.
-                          changeSurah(surahNumber, setPlaybackPoints: true);
-                          var surahFirstPage = getSurahPages(surahNumber).first;
-                          controller.move(totalPages - surahFirstPage);
-                        }));
-                      },
-                      child: Text(
-                        surahLabel,
-                        style: GoogleFonts.lateef(
-                          textStyle: const TextStyle(
-                              color: Colors.green,
-                              letterSpacing: .5,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        AlertUtls.showModal(context,
-                            JuzSelector(onJuzSelected: (int page) {
-                          controller.move(totalPages - page);
-                        }));
-                      },
-                      child: Text(
-                        'Juz $juzNumber',
-                        style: GoogleFonts.lateef(
-                          textStyle: const TextStyle(
-                              color: Colors.green,
-                              letterSpacing: .5,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: TransformerPageView(
-                      loop: false,
-                      index: totalPages - page,
-                      controller: controller,
-                      itemCount: totalPages,
-                      onPageChanged: (int? currentPage) {
-                        debouncer(const Duration(milliseconds: 500), () {
-                          if (currentPage == null) return;
-                          int id = totalPages - currentPage;
-                          setState(() {
-                            page = id;
-                          });
-                          setPageLabels(id);
-                        });
-                      },
-                      itemBuilder: (BuildContext context, int index) {
-                        int id =
-                            totalPages - index; // Reverse the order of pages
-                        double screenHeight =
-                            MediaQuery.of(context).size.height;
-                        return Column(
-                          children: [
-                            SingleChildScrollView(
-                              child: Container(
-                                margin: const EdgeInsets.all(5),
-                                padding: const EdgeInsets.all(2),
-                                decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    border: Border.all(
-                                        color: Colors.green,
-                                        width: 5,
-                                        style: BorderStyle.solid)),
-                                child: Container(
-                                  height: screenHeight > 600
-                                      ? screenHeight * .7
-                                      : 600,
-                                  decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      border: Border.all(
-                                          color: Colors.lightGreen,
-                                          width: 2,
-                                          style: BorderStyle.solid)),
-                                  child: ClipRect(
-                                    child: Align(
-                                      alignment: Alignment.center,
-                                      widthFactor:
-                                          0.99, // Adjust the width factor to crop the image
-                                      heightFactor:
-                                          0.99, // Adjust the height factor to crop the image
-                                      child: ArabicPageViewer(
-                                        page: id,
-                                        ayah: ayah,
-                                        surah: surahNumber,
-                                        ayahColor:
-                                            (int ayahNumber, int surahNumber) {
-                                          if (ayahNumber == ayahFrom &&
-                                              surahNumber == surahFrom) {
-                                            return Colors.orange;
-                                          } else if (ayahNumber == ayahTo &&
-                                              surahNumber == surahTo) {
-                                            return Colors.red;
-                                          } else {
-                                            return null;
-                                          }
-                                        },
-                                        onBackgroundClick: () {
-                                          setState(() {
-                                            settingAyahFrom = false;
-                                            settingAyahTo = false;
-                                          });
-                                        },
-                                        onAyahClicked: (int a, int surah) {
-                                          audioPlayer.pause();
-                                          setState(() {
-                                            if (settingAyahFrom) {
-                                              ayahFrom = a;
-                                              ayah = ayahFrom;
-                                              surahFrom = surah;
-                                              settingAyahFrom = false;
-                                              currentRepeat = 1;
-
-                                              if (surah == surahNumber) {
-                                                // ayah = ayahFrom;
-                                                print("seek to ayah");
-                                                if (surahAudio != null) {
-                                                  audioPlayer.seekTo(surahAudio!
-                                                      .ayahs[ayahFrom - 1]
-                                                      .startFrom);
-                                                }
-                                              } else {
-                                                if (surahFrom < surahTo) {
-                                                  //fine
-                                                  print("Lets reload an audio");
-                                                } else if (surahFrom >
-                                                    surahTo) {
-                                                  ayahTo =
-                                                      getVerseCount(surahFrom);
-                                                  surahTo = surahFrom;
-                                                } else {
-                                                  if (ayahFrom < ayahTo) {
-                                                    ayahTo = ayahFrom;
-                                                  }
-                                                }
-                                                changeSurah(surah);
-                                              }
-                                            } else if (settingAyahTo) {
-                                              if (surah == surahNumber &&
-                                                  a < ayahFrom) {
-                                                ayahTo = ayahFrom;
-                                                surahTo = surahFrom;
-                                                AlertUtls.toast(context,
-                                                    message:
-                                                        "Ending verse shouldn't be before starting verse");
-                                              } else if (surah < surahNumber) {
-                                                ayahTo = ayahFrom;
-                                                surahTo = surahFrom;
-                                                AlertUtls.toast(context,
-                                                    message:
-                                                        "Ending verse shouldn't be before starting verse");
-                                              } else {
-                                                ayahTo = a;
-                                                surahTo = surah;
-                                                settingAyahTo = false;
-                                              }
-                                            } else {
-                                              settingAyahFrom = false;
-                                            }
-                                          });
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (showPageNumbers)
-                              PageButton(page, (chosenPage) {
-                                controller.move(totalPages - chosenPage);
-                                setState(() {
-                                  showPageNumbers = !showPageNumbers;
-                                });
-                              }),
-                            if (!showPageNumbers)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  IconButton(
-                                      onPressed: () => setState(() {
-                                            showPageNumbers = !showPageNumbers;
-                                          }),
-                                      icon: Text(
-                                        getVerseEndSymbol(page),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge
-                                            ?.copyWith(
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.green),
-                                      )),
-                                ],
-                              )
-                          ],
-                        );
-                      }),
-                ),
-              ],
-            ),
-          ),
-          Positioned(
-              bottom: controlPosition ?? 30,
-              width: MediaQuery.of(context).size.width - 10,
-              child: _buildControls()),
-        ],
-      ),
-    ));
-  }
-
-  Widget _buildControls() {
-    final screenHeight = MediaQuery.of(context).size.height;
-    return GestureDetector(
-      onVerticalDragUpdate: (details) {
-        setState(() {
-          final newPos = screenHeight - details.globalPosition.dy;
-          controlPosition = newPos.clamp(0.0, screenHeight - 80);
-        });
-      },
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Setup card (when no audio loaded)
-          if (showControls && surahAudio == null) _buildAudioSetupCard(),
-
-          // Icon row: visibility toggle (left) · more options (right)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              AppIconButton(
-                icon: showControls ? Icons.visibility : Icons.visibility_off,
-                iconSize: 17,
-                onPressed: () {
-                  setState(() => showControls = !showControls);
-                },
-              ),
-              // Playback pill (centred, above the icon row)
-              if (showControls && surahAudio != null)
-                Center(
+          // ── Full-screen page viewer ─────────────────────────────────────
+          Positioned.fill(
+            child: TransformerPageView(
+              loop: false,
+              index: totalPages - page,
+              controller: controller,
+              itemCount: totalPages,
+              onPageChanged: (int? currentPage) {
+                debouncer(const Duration(milliseconds: 500), () {
+                  if (currentPage == null) return;
+                  final int id = totalPages - currentPage;
+                  setState(() => page = id);
+                  setPageLabels(id);
+                  _revealControls();
+                });
+              },
+              itemBuilder: (BuildContext context, int index) {
+                final int id = totalPages - index;
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 68, 10, 160),
                   child: Container(
-                    margin: const EdgeInsets.only(bottom: 6),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: const BorderRadius.all(Radius.circular(30)),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.grey[300]!,
-                          spreadRadius: 1,
-                          blurRadius: 10,
-                        )
+                          color: Colors.black.withValues(alpha: 0.10),
+                          blurRadius: 20,
+                          offset: const Offset(0, 4),
+                        ),
                       ],
+                      border: Border.all(
+                        color: AppColors.primary.withValues(alpha: 0.25),
+                        width: 3,
+                      ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          onPressed: () {
-                            setState(() {
-                              settingAyahFrom = true;
-                              settingAyahTo = false;
-                            });
-                          },
-                          icon: Text(
-                            settingAyahFrom ? "_" : getVerseEndSymbol(ayahFrom),
-                            textScaler: TextScaler.linear(1.5),
-                            style: TextStyle(
-                                color: settingAyahFrom
-                                    ? Colors.green
-                                    : Colors.black),
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: AppColors.primaryMuted
+                              .withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: ClipRect(
+                        child: Align(
+                          alignment: Alignment.center,
+                          widthFactor: 0.99,
+                          heightFactor: 0.99,
+                          child: ArabicPageViewer(
+                            page: id,
+                            ayah: ayah,
+                            surah: surahNumber,
+                            ayahColor:
+                                (int ayahNumber, int surahNumber) {
+                              if (ayahNumber == ayahFrom &&
+                                  surahNumber == surahFrom) {
+                                return Colors.orange;
+                              } else if (ayahNumber == ayahTo &&
+                                  surahNumber == surahTo) {
+                                return Colors.red;
+                              } else {
+                                return null;
+                              }
+                            },
+                            onBackgroundClick: () {
+                              if (settingAyahFrom || settingAyahTo) {
+                                setState(() {
+                                  settingAyahFrom = false;
+                                  settingAyahTo = false;
+                                });
+                              } else {
+                                _onContentTap();
+                              }
+                            },
+                            onAyahClicked: (int a, int surah) {
+                              audioPlayer.pause();
+                              setState(() {
+                                if (settingAyahFrom) {
+                                  ayahFrom = a;
+                                  ayah = ayahFrom;
+                                  surahFrom = surah;
+                                  settingAyahFrom = false;
+                                  currentRepeat = 1;
+                                  if (surah == surahNumber) {
+                                    print("seek to ayah");
+                                    if (surahAudio != null) {
+                                      audioPlayer.seekTo(surahAudio!
+                                          .ayahs[ayahFrom - 1]
+                                          .startFrom);
+                                    }
+                                  } else {
+                                    if (surahFrom < surahTo) {
+                                      print("Lets reload an audio");
+                                    } else if (surahFrom > surahTo) {
+                                      ayahTo = getVerseCount(surahFrom);
+                                      surahTo = surahFrom;
+                                    } else {
+                                      if (ayahFrom < ayahTo) {
+                                        ayahTo = ayahFrom;
+                                      }
+                                    }
+                                    changeSurah(surah);
+                                  }
+                                } else if (settingAyahTo) {
+                                  if (surah == surahNumber &&
+                                      a < ayahFrom) {
+                                    ayahTo = ayahFrom;
+                                    surahTo = surahFrom;
+                                    AlertUtls.toast(context,
+                                        message:
+                                            "Ending verse shouldn't be before starting verse");
+                                  } else if (surah < surahNumber) {
+                                    ayahTo = ayahFrom;
+                                    surahTo = surahFrom;
+                                    AlertUtls.toast(context,
+                                        message:
+                                            "Ending verse shouldn't be before starting verse");
+                                  } else {
+                                    ayahTo = a;
+                                    surahTo = surah;
+                                    settingAyahTo = false;
+                                  }
+                                } else {
+                                  settingAyahFrom = false;
+                                }
+                              });
+                            },
                           ),
                         ),
-                        Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            AppIconButton(
-                              onPressed: () {
-                                if (audioPlayer.playing) {
-                                  audioPlayer.pause();
-                                } else {
-                                  if (audioPlayer.initialisedPlayback) {
-                                    audioPlayer.resume();
-                                  } else {
-                                    startPlayback();
-                                  }
-                                }
-                              },
-                              icon: audioPlayer.playing
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              iconColor: Colors.green[900],
-                              backgroundColor: Colors.green[100],
-                            ),
-                            Positioned(
-                              left: 20,
-                              top: 10,
-                              child: CircleAvatar(
-                                backgroundColor: Colors.green[900],
-                                radius: audioPlayer.playing ? 7 : 0.1,
-                                child: Text(
-                                  (repeatTimes - currentRepeat).toString(),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(color: Colors.white),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        IconButton(
-                          onPressed: () {
-                            setState(() {
-                              settingAyahFrom = false;
-                              settingAyahTo = true;
-                            });
-                          },
-                          icon: Text(
-                            settingAyahTo ? "_" : getVerseEndSymbol(ayahTo),
-                            textScaler: TextScaler.linear(1.5),
-                            style: TextStyle(
-                                color: settingAyahTo
-                                    ? Colors.green
-                                    : Colors.black),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // ── Top bar overlay ─────────────────────────────────────────────
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: AnimatedSlide(
+              offset: _controlsVisible
+                  ? Offset.zero
+                  : const Offset(0, -1),
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              child: AnimatedOpacity(
+                opacity: _controlsVisible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 220),
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: _buildTopBar(),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Bottom bar overlay ──────────────────────────────────────────
+          Positioned(
+            bottom: 0, left: 0, right: 0,
+            child: AnimatedSlide(
+              offset: _controlsVisible
+                  ? Offset.zero
+                  : const Offset(0, 1),
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              child: AnimatedOpacity(
+                opacity: _controlsVisible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 220),
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: _buildBottomBar(),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Lock hint (always visible while locked) ───────────────────
+          if (_locked)
+            Positioned(
+              bottom: MediaQuery.of(context).padding.bottom + 20,
+              left: 0, right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: _toggleLock,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.lock_outline,
+                            size: 13, color: Colors.white70),
+                        SizedBox(width: 7),
+                        Text(
+                          'Tap to unlock',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-              if (showControls && surahAudio != null)
-                Stack(
-                  alignment: Alignment.center,
-                  clipBehavior: Clip.none,
-                  children: [
-                    AppIconButton(
-                      icon: Icons.more_horiz,
-                      iconSize: 17,
-                      onPressed: () {
-                        AlertUtls.showModal(context, buildOptions());
-                      },
-                    ),
-                    if (surahAudio!.ayahs.length != surahAudio!.totalAyahs)
-                      const Positioned(
-                        right: 2,
-                        top: 6,
-                        child: CircleAvatar(
-                          backgroundColor: Colors.orange,
-                          radius: 5,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Material(
+      color: AppColors.primary,
+      elevation: 0,
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: 56,
+          child: Row(
+            children: [
+              BackButton(
+                color: Colors.white,
+                onPressed: () => Navigator.maybePop(context),
+              ),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _openSurahSelector,
+                  child: Center(
+                    child: Text(
+                      surahLabel,
+                      style: GoogleFonts.lateef(
+                        textStyle: const TextStyle(
+                          fontSize: 24,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
                         ),
                       ),
+                    ),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _openJuzSelector,
+                child: Text(
+                  'Juz $juzNumber',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  _locked ? Icons.lock : Icons.lock_open_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                onPressed: _toggleLock,
+                tooltip: _locked ? 'Unlock' : 'Lock screen',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Material(
+      color: AppColors.cardSurface,
+      child: SafeArea(
+        top: false,
+        child: Container(
+          decoration: const BoxDecoration(
+            border: Border(
+                top: BorderSide(color: AppColors.border, width: 0.5)),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Audio setup (when no audio loaded) ────────────────────
+              if (surahAudio == null) _buildAudioSetupCard(),
+
+              // ── Playback controls (when audio loaded) ─────────────────
+              if (surahAudio != null)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // From-ayah marker
+                    IconButton(
+                      onPressed: () => setState(() {
+                        settingAyahFrom = !settingAyahFrom;
+                        settingAyahTo = false;
+                      }),
+                      icon: Text(
+                        settingAyahFrom ? '—' : getVerseEndSymbol(ayahFrom),
+                        textScaler: TextScaler.linear(1.5),
+                        style: TextStyle(
+                          color: settingAyahFrom
+                              ? AppColors.primary
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                      tooltip: 'Set start verse',
+                    ),
+
+                    // Play / Pause with repeat counter
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        AppIconButton(
+                          onPressed: () {
+                            if (audioPlayer.playing) {
+                              audioPlayer.pause();
+                            } else if (audioPlayer.initialisedPlayback) {
+                              audioPlayer.resume();
+                            } else {
+                              startPlayback();
+                            }
+                          },
+                          icon: audioPlayer.playing
+                              ? Icons.pause
+                              : Icons.play_arrow,
+                          iconColor: AppColors.primary,
+                          backgroundColor:
+                              AppColors.primary.withValues(alpha: 0.1),
+                        ),
+                        Positioned(
+                          left: 20,
+                          top: 10,
+                          child: CircleAvatar(
+                            backgroundColor: AppColors.primary,
+                            radius: audioPlayer.playing ? 7 : 0.1,
+                            child: Text(
+                              (repeatTimes - currentRepeat).toString(),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // To-ayah marker
+                    IconButton(
+                      onPressed: () => setState(() {
+                        settingAyahTo = !settingAyahTo;
+                        settingAyahFrom = false;
+                      }),
+                      icon: Text(
+                        settingAyahTo ? '—' : getVerseEndSymbol(ayahTo),
+                        textScaler: TextScaler.linear(1.5),
+                        style: TextStyle(
+                          color: settingAyahTo
+                              ? AppColors.primary
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                      tooltip: 'Set end verse',
+                    ),
+
+                    // More options
+                    Stack(
+                      alignment: Alignment.center,
+                      clipBehavior: Clip.none,
+                      children: [
+                        AppIconButton(
+                          icon: Icons.more_horiz,
+                          iconSize: 17,
+                          onPressed: () =>
+                              AlertUtls.showModal(context, buildOptions()),
+                        ),
+                        if (surahAudio!.ayahs.length !=
+                            surahAudio!.totalAyahs)
+                          const Positioned(
+                            right: 2,
+                            top: 6,
+                            child: CircleAvatar(
+                              backgroundColor: Colors.orange,
+                              radius: 5,
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
             ],
           ),
-        ],
+        ),
       ),
+    );
+  }
+
+  void _openSurahSelector() {
+    _revealControls();
+    AlertUtls.showModal(
+      context,
+      SurahSelector(onSurahSelected: (int sNum) {
+        changeSurah(sNum, setPlaybackPoints: true);
+        final p = getSurahPages(sNum).first;
+        controller.move(totalPages - p);
+      }),
+    );
+  }
+
+  void _openJuzSelector() {
+    _revealControls();
+    AlertUtls.showModal(
+      context,
+      JuzSelector(onJuzSelected: (int p) {
+        controller.move(totalPages - p);
+      }),
     );
   }
 

@@ -27,6 +27,23 @@ class AppSettings {
   set hasSeenTrainInstructions(bool val) =>
       box?.put("hasSeenTrainInstructions", val);
 
+  // ── Notification preferences ──────────────────────────────────────────────
+
+  bool get journeyRemindersEnabled =>
+      box?.get("journeyRemindersEnabled", defaultValue: true) ?? true;
+  set journeyRemindersEnabled(bool val) =>
+      box?.put("journeyRemindersEnabled", val);
+
+  bool get nudgeNotificationsEnabled =>
+      box?.get("nudgeNotificationsEnabled", defaultValue: true) ?? true;
+  set nudgeNotificationsEnabled(bool val) =>
+      box?.put("nudgeNotificationsEnabled", val);
+
+  bool get companionActivityEnabled =>
+      box?.get("companionActivityEnabled", defaultValue: true) ?? true;
+  set companionActivityEnabled(bool val) =>
+      box?.put("companionActivityEnabled", val);
+
   Future<void> initHive() async {
     AppConfig config = AppConfig();
     if (config.appStoreBoxPath == null) {

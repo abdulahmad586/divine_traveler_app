@@ -1,9 +1,12 @@
 import 'dart:math';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:tahfeex/resources/resources.dart';
+import 'package:tahfeex/screens/legal_screen.dart';
 import 'package:tahfeex/service/auth_service.dart';
 import 'package:tahfeex/shared/constants/constants.dart';
+import 'package:tahfeex/widgets/app_route.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -294,13 +297,54 @@ class _LoginScreenState extends State<LoginScreen>
 
                           const SizedBox(height: 20),
 
-                          const Text(
-                            'By continuing you agree to our Terms of Service.',
+                          RichText(
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.white30,
-                              letterSpacing: 0.2,
+                            text: TextSpan(
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.white30,
+                                letterSpacing: 0.2,
+                              ),
+                              children: [
+                                const TextSpan(
+                                    text: 'By continuing you agree to our '),
+                                TextSpan(
+                                  text: 'Terms & Conditions',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = () => Navigator.push(
+                                          context,
+                                          AppRoute(
+                                            builder: (_) => const LegalScreen(
+                                              document: LegalDocument
+                                                  .termsAndConditions,
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                                const TextSpan(text: ' and '),
+                                TextSpan(
+                                  text: 'Privacy Policy',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = () => Navigator.push(
+                                          context,
+                                          AppRoute(
+                                            builder: (_) => const LegalScreen(
+                                              document:
+                                                  LegalDocument.privacyPolicy,
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                                const TextSpan(text: '.'),
+                              ],
                             ),
                           ),
                         ],

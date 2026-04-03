@@ -379,3 +379,4 @@ Phases should be executed in this order to avoid rework:
 | `lib/widgets/animated_progress_bar.dart` | Smooth progress animation |
 | `lib/widgets/app_route.dart` | Unified page transition wrapper |
 | `lib/shared/constants/app_sizes.dart` | Spacing/radius constants |
+

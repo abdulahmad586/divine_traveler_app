@@ -5,11 +5,13 @@ import 'package:tahfeex/resources/resources.dart';
 import 'package:tahfeex/screens/audio_surahs_screen.dart';
 import 'package:tahfeex/screens/companions_screen.dart';
 import 'package:tahfeex/screens/journey_list_screen.dart';
+import 'package:tahfeex/screens/settings_screen.dart';
 import 'package:tahfeex/service/auth_service.dart';
 import 'package:tahfeex/service/states/states.dart';
 import 'package:tahfeex/shared/constants/constants.dart';
 import 'package:tahfeex/shared/models/models.dart';
 import 'package:tahfeex/shared/progression/user_progression.dart';
+import 'package:tahfeex/widgets/app_dialog.dart';
 import 'package:tahfeex/widgets/app_route.dart';
 
 class MyProfileScreen extends StatelessWidget {
@@ -228,6 +230,16 @@ class _MyProfileView extends StatelessWidget {
 
                   // ── Settings ─────────────────────────────────────────────
                   _sectionLabel('SETTINGS'),
+                  _NavRow(
+                    icon: Icons.tune_outlined,
+                    label: 'App Preferences',
+                    subtitle: 'Font sizes, notifications',
+                    onTap: () => Navigator.push(
+                      context,
+                      AppRoute(builder: (_) => const SettingsScreen()),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   _InfoCard(
                     child: Row(
                       children: [
@@ -252,13 +264,20 @@ class _MyProfileView extends StatelessWidget {
                             ],
                           ),
                         ),
-                        Switch(
-                          value: user.allowFriendRequests,
-                          onChanged: state.isSaving
-                              ? null
-                              : (_) => cubit.toggleAllowFriendRequests(),
-                          activeTrackColor: AppColors.primary,
-                        ),
+                        state.isSaving
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primary),
+                              )
+                            : Switch(
+                                value: user.allowFriendRequests,
+                                onChanged: (_) =>
+                                    cubit.toggleAllowFriendRequests(),
+                                activeTrackColor: AppColors.primary,
+                              ),
                       ],
                     ),
                   ),
@@ -288,6 +307,24 @@ class _MyProfileView extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  // ── Delete account ───────────────────────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: () => _showDeleteAccountDialog(context, cubit),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.red[300],
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text(
+                        'Delete Account',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -310,6 +347,16 @@ class _MyProfileView extends StatelessWidget {
         ),
       );
 
+  Future<void> _showDeleteAccountDialog(
+    BuildContext context,
+    ProfileCubit cubit,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _DeleteAccountDialog(cubit: cubit),
+    );
+  }
+
   Future<void> _showEditUsernameDialog(
     BuildContext context,
     ProfileCubit cubit,
@@ -318,6 +365,77 @@ class _MyProfileView extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (_) => _EditUsernameDialog(cubit: cubit, current: current),
+    );
+  }
+}
+
+// ── Delete account dialog ─────────────────────────────────────────────────────
+
+class _DeleteAccountDialog extends StatefulWidget {
+  final ProfileCubit cubit;
+  const _DeleteAccountDialog({required this.cubit});
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  bool _loading = false;
+  String? _error;
+
+  Future<void> _confirm() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      await widget.cubit.deleteAccount();
+      // authStateChanges drives navigation — no need to pop manually.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = e.toString(); });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppDialog(
+      title: 'Delete Account',
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This will permanently delete your account and all associated data — journeys, progress, companions, and audio contributions. This cannot be undone.',
+            style: TextStyle(fontSize: 14, height: 1.5),
+          ),
+          if (_loading) ...[
+            const SizedBox(height: 16),
+            const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.red),
+              ),
+            ),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(_error!,
+                style: const TextStyle(color: Colors.red, fontSize: 13)),
+          ],
+        ],
+      ),
+      actions: [
+        AppDialogAction(
+          label: 'Cancel',
+          onPressed: _loading ? null : () => Navigator.pop(context),
+        ),
+        AppDialogAction(
+          label: 'Delete',
+          isPrimary: true,
+          isDestructive: true,
+          onPressed: _loading ? null : _confirm,
+        ),
+      ],
     );
   }
 }
@@ -439,8 +557,8 @@ class _EditUsernameDialogState extends State<_EditUsernameDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Change Username'),
+    return AppDialog(
+      title: 'Change Username',
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,6 +575,17 @@ class _EditUsernameDialogState extends State<_EditUsernameDialog> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _save(),
           ),
+          if (_loading) ...[
+            const SizedBox(height: 12),
+            const Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.primary),
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!,
@@ -465,22 +594,14 @@ class _EditUsernameDialogState extends State<_EditUsernameDialog> {
         ],
       ),
       actions: [
-        TextButton(
+        AppDialogAction(
+          label: 'Cancel',
           onPressed: _loading ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
         ),
-        FilledButton(
+        AppDialogAction(
+          label: 'Save',
+          isPrimary: true,
           onPressed: _loading ? null : _save,
-          style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary),
-          child: _loading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Text('Save'),
         ),
       ],
     );

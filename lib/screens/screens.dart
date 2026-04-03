@@ -20,3 +20,5 @@ export 'package:tahfeex/screens/companions_screen.dart';
 export 'package:tahfeex/screens/incoming_requests_screen.dart';
 export 'package:tahfeex/screens/my_profile_screen.dart';
 export 'package:tahfeex/screens/user_profile_screen.dart';
+export 'package:tahfeex/screens/settings_screen.dart';
+export 'package:tahfeex/screens/legal_screen.dart';

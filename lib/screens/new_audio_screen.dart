@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:quran/quran.dart';
@@ -41,6 +42,8 @@ class _NewAudioState extends State<NewAudio> {
       fileSize;
   bool uploadFile = true;
   bool loading = false;
+  bool _extracting = true;
+  String? _extractError;
   int trackDurationMS = 0;
 
   GlobalKey<FormState> formKey = GlobalKey<FormState>();
@@ -67,11 +70,13 @@ class _NewAudioState extends State<NewAudio> {
     super.dispose();
   }
 
-  Future<String> calculateSHA256OfFile(String filePath) async {
-    final file = File(filePath);
-    final hash = crypto.sha256.convert(await file.readAsBytes());
-    return hash.toString();
+  static String _computeHash(String filePath) {
+    final bytes = File(filePath).readAsBytesSync();
+    return crypto.sha256.convert(bytes).toString();
   }
+
+  Future<String> calculateSHA256OfFile(String filePath) =>
+      compute(_computeHash, filePath);
 
   Future<void> extractAudioData() async {
     try {
@@ -93,15 +98,16 @@ class _NewAudioState extends State<NewAudio> {
       fileSize.text =
           "${(widget.file.size / (1024 * 1024)).toStringAsFixed(1)} mb";
 
-      if (mounted) setState(() {});
       await player.dispose();
+      if (mounted) setState(() => _extracting = false);
     } catch (e) {
-      print("Error extracting metadata: $e");
-      extractBasicFileInfo();
+      debugPrint("Error extracting metadata: $e");
+      _extractBasicFileInfo();
+      if (mounted) setState(() { _extracting = false; _extractError = 'Could not read audio metadata — please review the fields below.'; });
     }
   }
 
-  void extractBasicFileInfo() {
+  void _extractBasicFileInfo() {
     trackDurationMS = 0;
     recitationTitle.text = widget.file.name;
     recitersName.text = "";
@@ -169,112 +175,168 @@ class _NewAudioState extends State<NewAudio> {
             ? "Set up audio"
             : "New Recitation"),
       ),
-      body: Container(
-        height: MediaQuery.of(context).size.height - 70,
-        padding: const EdgeInsets.all(10),
-        child: Form(
-          key: formKey,
-          child: Column(
-            children: [
-              Text(
-                getSurahNameArabic(widget.surahNumber),
-                style: ArabicAyahViewer.ayahTextStyle
-                    .copyWith(fontWeight: FontWeight.bold),
-                textScaler: TextScaler.linear(3.0),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                "${widget.surahNumber} - ${getSurahName(widget.surahNumber)}",
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontSize: 16),
-              ),
-              const SizedBox(height: 30),
-              AppTextField(
-                labelText: "Reciter's Name",
-                validator: (str) => str == null || str.isEmpty
-                    ? "Please enter reciter's name"
-                    : null,
-                controller: recitersName,
-              ),
-              const SizedBox(height: 10),
-              AppTextField(
-                labelText: "Recitation title",
-                validator: (str) =>
-                    str == null || str.isEmpty ? "Please enter a title" : null,
-                controller: recitationTitle,
-              ),
-              const SizedBox(height: 50),
-              AppTextField(
-                labelText: "Playback Time",
-                controller: trackDuration,
-                enabled: false,
-              ),
-              const SizedBox(height: 10),
-              AppTextField(
-                labelText: "File Size",
-                controller: fileSize,
-                enabled: false,
-              ),
-              const SizedBox(height: 10),
-              AppTextField(
-                labelText: "Integrity Hash",
-                controller: fileHash,
-                enabled: false,
-                suffixIcon: fileHash.text.isEmpty
-                    ? null
-                    : const Icon(Icons.verified, color: Colors.green),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  const Expanded(
-                      child: Text(
-                    "Help your fellow travellers by uploading this recitation",
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  )),
-                  Checkbox(
-                      value: uploadFile,
-                      onChanged: (enabled) =>
-                          setState(() => uploadFile = enabled!))
-                ],
-              ),
-              if (widget.launchTrainingOnSave) ...[
-                const SizedBox(height: 12),
-                Row(
+      body: _extracting
+          ? _buildLoadingState()
+          : Container(
+              height: MediaQuery.of(context).size.height - 70,
+              padding: const EdgeInsets.all(10),
+              child: Form(
+                key: formKey,
+                child: Column(
                   children: [
-                    const Icon(Icons.info_outline,
-                        size: 16, color: Colors.green),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        "Next you'll sync verses — tap a button each time a new verse begins.",
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: Colors.grey[600]),
-                      ),
+                    Text(
+                      getSurahNameArabic(widget.surahNumber),
+                      style: ArabicAyahViewer.ayahTextStyle
+                          .copyWith(fontWeight: FontWeight.bold),
+                      textScaler: TextScaler.linear(3.0),
                     ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "${widget.surahNumber} - ${getSurahName(widget.surahNumber)}",
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontSize: 16),
+                    ),
+                    const SizedBox(height: 20),
+                    if (_extractError != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_outlined,
+                                size: 16, color: Colors.amber.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _extractError!,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.amber.shade800),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    AppTextField(
+                      labelText: "Reciter's Name",
+                      validator: (str) => str == null || str.isEmpty
+                          ? "Please enter reciter's name"
+                          : null,
+                      controller: recitersName,
+                    ),
+                    const SizedBox(height: 10),
+                    AppTextField(
+                      labelText: "Recitation title",
+                      validator: (str) => str == null || str.isEmpty
+                          ? "Please enter a title"
+                          : null,
+                      controller: recitationTitle,
+                    ),
+                    const SizedBox(height: 20),
+                    AppTextField(
+                      labelText: "Playback Time",
+                      controller: trackDuration,
+                      enabled: false,
+                    ),
+                    const SizedBox(height: 10),
+                    AppTextField(
+                      labelText: "File Size",
+                      controller: fileSize,
+                      enabled: false,
+                    ),
+                    const SizedBox(height: 10),
+                    AppTextField(
+                      labelText: "Integrity Hash",
+                      controller: fileHash,
+                      enabled: false,
+                      suffixIcon: fileHash.text.isEmpty
+                          ? null
+                          : const Icon(Icons.verified, color: Colors.green),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        const Expanded(
+                            child: Text(
+                          "Help your fellow travellers by uploading this recitation",
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        )),
+                        Checkbox(
+                            value: uploadFile,
+                            onChanged: (enabled) =>
+                                setState(() => uploadFile = enabled!))
+                      ],
+                    ),
+                    if (widget.launchTrainingOnSave) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          const Icon(Icons.info_outline,
+                              size: 16, color: Colors.green),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              "Next you'll sync verses — tap a button each time a new verse begins.",
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: Colors.grey[600]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 30),
+                    const Spacer(),
+                    AppButton(
+                      label: widget.launchTrainingOnSave
+                          ? "CONTINUE TO VERSE SYNC"
+                          : "CONTINUE",
+                      backgroundColor: AppColors.primaryColor,
+                      labelColor: Colors.white,
+                      loading: loading,
+                      onTap: _onContinue,
+                    ),
+                    const SizedBox(height: 30),
                   ],
                 ),
-              ],
-              const SizedBox(height: 30),
-              const Spacer(),
-              AppButton(
-                label: widget.launchTrainingOnSave
-                    ? "CONTINUE TO VERSE SYNC"
-                    : "CONTINUE",
-                backgroundColor: AppColors.primaryColor,
-                labelColor: Colors.white,
-                loading: loading,
-                onTap: _onContinue,
               ),
-              const SizedBox(height: 30),
-            ],
+            ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(color: AppColors.primaryColor),
+          const SizedBox(height: 20),
+          Text(
+            'Reading audio file…',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[600],
+            ),
           ),
-        ),
+          const SizedBox(height: 6),
+          Text(
+            widget.file.name,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[400],
+            ),
+          ),
+        ],
       ),
     );
   }
